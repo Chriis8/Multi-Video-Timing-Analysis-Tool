@@ -1,0 +1,1 @@
+A video player written in Rust using GStreamer and GTK bindings. It features segment timing, side-by-side video comparisons, and support for importing local files and YouTube videos, tailored for timing user-defined segments and comparing videos, ideal for speedrunning analysis.

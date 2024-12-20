@@ -12,8 +12,7 @@ fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<video_pipeline::Vide
     window.set_default_size(640, 480);
     window.set_title(Some("Video Player"));
 
-    let paintable = gstreamer_manager.get_paintable()
-        .expect("Failed to get paintable");
+    let paintable = gstreamer_manager.get_paintable();
 
     let vbox = gtk::Box::new(gtk::Orientation::Vertical, 10);
     let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 10);
@@ -141,7 +140,7 @@ fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<video_pipeline::Vide
         gtk::glib::ControlFlow::Continue
     });    
     
-    let bus = gstreamer_manager.get_bus().unwrap();
+    let bus = gstreamer_manager.get_bus();
     let app_weak = app.downgrade();
     let gstreamer_manager_clone = gstreamer_manager.clone();
     let bus_watch = bus
@@ -197,11 +196,7 @@ fn main() -> glib::ExitCode{
 
     gstgtk4::plugin_register_static().expect("Failed to register gstgtk4 plugin");
 
-    let gtksink = gstreamer::ElementFactory::make("gtk4paintablesink").property("sync", true).build()
-                .expect("Failed to make gtk paintable sink");
-    let pipeline = gstreamer::Pipeline::new();
-
-    let gstreamer_manager = Arc::new(video_pipeline::VideoPipeline::new(gtksink.clone(), pipeline.clone()));
+    let gstreamer_manager = Arc::new(video_pipeline::VideoPipeline::new());
 
     let app = gtk::Application::new(None::<&str>, gio::ApplicationFlags::FLAGS_NONE);
 

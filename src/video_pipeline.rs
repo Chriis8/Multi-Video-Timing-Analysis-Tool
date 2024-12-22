@@ -36,6 +36,12 @@ impl VideoPipeline {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.pipeline.set_state(gstreamer::State::Null).unwrap();
+        
+        *self = Self::new();
+    }
+
     fn send_seek_event(&self, rate: f64) -> bool {
         let position = match self.pipeline.query_position::<gstreamer::ClockTime>() {
             Some(pos) => pos,

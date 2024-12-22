@@ -5,22 +5,18 @@ use std::cell::RefCell;
 use gstgtk4;
 use std::sync::Arc;
 
-fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<video_pipeline::VideoPipeline>) {
+fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<RefCell<video_pipeline::VideoPipeline>>) {
     let window = gtk::ApplicationWindow::new(app);
     
 
     window.set_default_size(640, 480);
     window.set_title(Some("Video Player"));
 
-    let paintable = gstreamer_manager.get_paintable();
-
     let vbox = gtk::Box::new(gtk::Orientation::Vertical, 10);
     let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     let hboxtop = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     let picture = gtk::Picture::new();
     let label = gtk::Label::new(Some("Position: 00:00:00"));
-
-    picture.set_paintable(Some(&paintable));
 
     let text_view = gtk::Label::new(Some("Please, select a mpegts video file."));
     let fchooser = Button::with_label("Open File");
@@ -29,6 +25,7 @@ fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<video_pipeline::Vide
         let gstreamer_manager_clone = gstreamer_manager.clone();
         let text_view = text_view.clone();
         let window = window.clone();
+        let picture_clone = picture.clone();
     
         move |_| {
             println!("Done");
@@ -48,6 +45,7 @@ fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<video_pipeline::Vide
     
             let gstreamer_manager_double_clone = gstreamer_manager_clone.clone();
             let text_view = text_view.clone();
+            let picture_double_clone = picture_clone.clone();
     
             dialog.run_async(move |obj, res| {
                 match res {
@@ -58,7 +56,12 @@ fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<video_pipeline::Vide
                             println!("from_str {from_str}");
                             text_view.set_label(&from_str);
                             println!("File accepted: {}", from_str);
-                            gstreamer_manager_double_clone.build_pipeline(Some(&text_view.label().to_string()));
+                            gstreamer_manager_double_clone.borrow_mut().reset();
+
+                            gstreamer_manager_double_clone.borrow().build_pipeline(Some(&text_view.label().to_string()));
+
+                            let paintable = gstreamer_manager_double_clone.borrow().get_paintable();
+                            picture_double_clone.set_paintable(Some(&paintable));
                         }
                     }
                     _ => {
@@ -85,7 +88,7 @@ fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<video_pipeline::Vide
         let gstreamer_manager_clone = gstreamer_manager.clone();
 
         move |_| {
-            gstreamer_manager_clone.frame_backward();
+            gstreamer_manager_clone.borrow().frame_backward();
             eprintln!("Moved 1 frame backward");
         }
     });
@@ -94,7 +97,7 @@ fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<video_pipeline::Vide
         let gstreamer_manager_clone = gstreamer_manager.clone();
         move |_| {
             eprintln!("Pressed Play button");
-            gstreamer_manager_clone.play_video();
+            gstreamer_manager_clone.borrow().play_video();
         }
     });
     let stop_button = Button::with_label("Stop");
@@ -103,7 +106,7 @@ fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<video_pipeline::Vide
 
         move |_| {
             eprintln!("Pressed Stop button");
-            gstreamer_manager_clone.stop_video();
+            gstreamer_manager_clone.borrow().stop_video();
         }
     });
     let next_frame_button = Button::with_label("Next Frame");
@@ -111,7 +114,7 @@ fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<video_pipeline::Vide
         let gstreamer_manager_clone = gstreamer_manager.clone();
 
         move |_| {
-            gstreamer_manager_clone.frame_forward();
+            gstreamer_manager_clone.borrow().frame_forward();
             eprintln!("Moved 1 frame foward");
         }
     });
@@ -135,12 +138,12 @@ fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<video_pipeline::Vide
             None => return gtk::glib::ControlFlow::Break,
         };
 
-        let position = gstreamer_manager_c.get_position();
+        let position = gstreamer_manager_c.borrow().get_position();
         label.set_text(&format!("Position: {:.0}", position.display()));
         gtk::glib::ControlFlow::Continue
     });    
     
-    let bus = gstreamer_manager.get_bus();
+    let bus = gstreamer_manager.borrow().get_bus();
     let app_weak = app.downgrade();
     let gstreamer_manager_clone = gstreamer_manager.clone();
     let bus_watch = bus
@@ -154,7 +157,7 @@ fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<video_pipeline::Vide
 
             match msg.view() {
                 MessageView::Eos(..) => {
-                    gstreamer_manager_clone.pause_video();
+                    gstreamer_manager_clone.borrow().pause_video();
                 },
                 MessageView::Error(err) => {
                     println!(
@@ -196,7 +199,7 @@ fn main() -> glib::ExitCode{
 
     gstgtk4::plugin_register_static().expect("Failed to register gstgtk4 plugin");
 
-    let gstreamer_manager = Arc::new(video_pipeline::VideoPipeline::new());
+    let gstreamer_manager = Arc::new(RefCell::new(video_pipeline::VideoPipeline::new()));
 
     let app = gtk::Application::new(None::<&str>, gio::ApplicationFlags::FLAGS_NONE);
 

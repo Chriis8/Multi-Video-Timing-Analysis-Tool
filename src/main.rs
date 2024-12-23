@@ -118,11 +118,21 @@ fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<RefCell<video_pipeli
             eprintln!("Moved 1 frame foward");
         }
     });
+    let test_button = Button::with_label("Test");
+    test_button.connect_clicked({
+        let gstreamer_manager_clone = gstreamer_manager.clone();
+
+        move |_| {
+            eprintln!("Testing stuff");
+            gstreamer_manager_clone.borrow().get_current_frame();
+        }
+    });
     
     hbox.append(&previous_frame_button);
     hbox.append(&play_button);
     hbox.append(&stop_button);
     hbox.append(&next_frame_button);
+    hbox.append(&test_button);
     hbox.set_halign(gtk::Align::Center);
     hbox.set_margin_bottom(20);
     

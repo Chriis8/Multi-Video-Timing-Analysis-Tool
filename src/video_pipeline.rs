@@ -1,7 +1,7 @@
 use std::cell::RefCell;
-use gstreamer::{event::{self, Seek, Step}, prelude::*, subclass::prelude::PipelineImpl, Element, SeekFlags, SeekType};
+use gstreamer::{event::{self, Seek, Step}, prelude::*, Fraction, SeekFlags, SeekType};
 use gtk;
-use gtk::{gdk, glib};
+use gtk::gdk;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum PlaybackDirection {
@@ -214,9 +214,9 @@ impl VideoPipeline {
 
     pub fn stop_video(&self) {
         self.pipeline
-            .set_state(gstreamer::State::Null)
-            .expect("Failed to set pipeline state to Null");
-    }
+        .set_state(gstreamer::State::Null)
+        .expect("Failed to set pipeline state to Null");
+}
 
     pub fn frame_forward(&self) {
         if self.pipeline.current_state() != gstreamer::State::Paused {
@@ -252,5 +252,25 @@ impl VideoPipeline {
         if !success {
             eprintln!("Failed to move one frame backward");
         }
+    }
+
+    pub fn get_current_frame(&self) {
+        let current_time = self.pipeline.query_position::<gstreamer::format::Time>().unwrap();
+        
+        let video_sink = self.pipeline.by_name("video_convert").unwrap();
+        let sink_pads = video_sink.static_pad("sink").unwrap();
+        let caps = sink_pads.current_caps().unwrap();
+        let structure = caps.structure(0).unwrap();
+        if let Ok(fps_fraction) = structure.get::<gstreamer::Fraction>("framerate") {
+            let fps = fps_fraction.numer();
+            let time_per_frame = 1_000_000_000 / fps as u64;
+            let current_frame = current_time.nseconds() / time_per_frame;
+            println!("Current_frame: {current_frame}");
+
+        } else {
+            println!("Can't get the framerate");
+        }
+        
+        
     }
 }

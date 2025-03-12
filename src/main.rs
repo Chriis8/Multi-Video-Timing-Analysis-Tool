@@ -4,6 +4,8 @@ use gtk::{prelude::*, Button, glib};
 use std::cell::RefCell;
 use gstgtk4;
 use std::sync::Arc;
+mod widgets;
+use widgets::video_player_widget::VideoPlayer;
 
 fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<RefCell<video_pipeline::VideoPipeline>>) {
     let window = gtk::ApplicationWindow::new(app);
@@ -52,7 +54,7 @@ fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<RefCell<video_pipeli
                     gtk::ResponseType::Accept => {
                         println!("Accepted");
                         if let Some(file) = obj.file() {
-                            let from_str = gio::File::uri(&file);
+                            let from_str = gtk::gio::File::uri(&file);
                             println!("from_str {from_str}");
                             text_view.set_label(&from_str);
                             println!("File accepted: {}", from_str);
@@ -209,16 +211,26 @@ fn main() -> glib::ExitCode{
 
     gstgtk4::plugin_register_static().expect("Failed to register gstgtk4 plugin");
 
-    let gstreamer_manager = Arc::new(RefCell::new(video_pipeline::VideoPipeline::new()));
-
-    let app = gtk::Application::new(None::<&str>, gio::ApplicationFlags::FLAGS_NONE);
+    let gstreamer_manager_1 = Arc::new(RefCell::new(video_pipeline::VideoPipeline::new()));
+    //let gstreamer_manager_2 = Arc::new(RefCell::new(video_pipeline::VideoPipeline::new()));
+    
+    let app = gtk::Application::new(None::<&str>, gtk::gio::ApplicationFlags::FLAGS_NONE);
 
     app.connect_activate({
-        let gstreamer_manager = Arc::clone(&gstreamer_manager);
+        let gstreamer_manager_1 = Arc::clone(&gstreamer_manager_1);
         move |app| {
-            create_ui(app, gstreamer_manager.clone())
+            create_ui(app, gstreamer_manager_1.clone())
         }
     });
+
+    // app.connect_activate({
+    //     let gstreamer_manager_2 = Arc::clone(&gstreamer_manager_2);
+    //     move |app| {
+    //         create_ui(app, gstreamer_manager_2.clone())
+    //     }
+    // });
+
+
     let res = app.run();
 
     unsafe {

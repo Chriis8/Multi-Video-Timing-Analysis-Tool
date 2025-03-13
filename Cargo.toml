@@ -11,3 +11,6 @@ gstreamer = "0.23"
 gstreamer-video = "0.23"
 gstgtk4 = { package = "gst-plugin-gtk4", version = "0.13.3"}
 
+[build-dependencies]
+glib-build-tools = "0.20.0"
+

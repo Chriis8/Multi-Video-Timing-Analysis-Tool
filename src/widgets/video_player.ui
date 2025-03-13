@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+    <template class="VideoPlayer" parent="GtkBox">
+        <property name="visible">true</property>
+
+        <child>
+            <object class="GtkBox" id="vbox">
+                <property name="spacing">10</property>
+
+                <child>
+                    <object class="GtkBox" id="hboxtop">
+                        <property name="spacing">10</property>
+                        <property name="halign">GTK_ALIGN_CENTER</property>
+                        <property name="margin-top">20</property>
+
+                        <child>
+                            <object class="GtkButton" id="fchooser">
+                                <property name="label">Open File</property>
+                            </object>
+                        </child>
+
+                        <child>
+                            <object class="GtkLabel" id="text_view">
+                                <property name="label">Please, select a mpegts video file.</property>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+
+                <child>
+                    <object class="GtkPicture" id="picture"></object>
+                </child>
+
+                <child>
+                    <object class="GtkLabel" id="label">
+                        <property name="label">Position: 00:00:00</property>
+                    </object>
+                </child>
+
+                <child>
+                    <object class="GtkBox" id="hbox">
+                        <property name="spacing">10</property>
+
+                        <child>
+                            <object class="GtkButton" id="previous_frame_button">
+                                <property name="label">Preivous Frame</property>
+                            </object>
+                        </child>
+
+                        <child>
+                            <object class="GtkButton" id="play_button">
+                                <property name="label">Play</property>
+                            </object>
+                        </child>
+
+                        <child>
+                            <object class="GtkButton" id="stop_button">
+                                <property name="label">Stop</property>
+                            </object>
+                        </child>
+
+                        <child>
+                            <object class="GtkButton" id="next_frame_button">
+                                <property name="label">Next Frame</property>
+                            </object>
+                        </child>
+
+                        <child>
+                            <object class="GtkButton" id="test_button">
+                                <property name="label">Test</property>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+            </object>
+        </child>
+    </template>
+</interface>

@@ -1,0 +1,16 @@
+window
+    vbox (GtkBox, spacing 10)
+        hboxtop (GtkBox, spacing 10) -> (halign: Center), (top margin: 20)
+            fchooser (GtkButton, label= "Open File")
+            text_view (GtkLabel, text="Please, select a mpegts video file.")
+        picture (GtkPicture)
+        label (GtkLabel, text="Position: 00:00:00")
+        hbox (GtkBox, spacing 10)
+            previous_frame_button (GtkButton, label="Previous Frame")
+            play_button (GtkButton, label="Play")
+            stop_button (GtkButton, label="Stop")
+            next_frame_buttom (GtkButton, label="Next Frame")
+            test_button (GtkButton, label="Test")
+
+
+https://gtk-rs.org/gtk4-rs/stable/latest/book/composite_templates.html

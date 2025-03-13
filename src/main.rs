@@ -203,7 +203,7 @@ fn create_ui(app: &gtk::Application, gstreamer_manager: Arc<RefCell<video_pipeli
     });
 }
 
-fn main() -> glib::ExitCode{
+fn main() -> glib::ExitCode {
     gstreamer::init().unwrap();
     gtk::init().unwrap();
 
@@ -211,16 +211,38 @@ fn main() -> glib::ExitCode{
 
     gstgtk4::plugin_register_static().expect("Failed to register gstgtk4 plugin");
 
+    gio::resources_register_include!("video_player.gresource")
+        .expect("Failed to register resources.");
+
     let gstreamer_manager_1 = Arc::new(RefCell::new(video_pipeline::VideoPipeline::new()));
     //let gstreamer_manager_2 = Arc::new(RefCell::new(video_pipeline::VideoPipeline::new()));
     
     let app = gtk::Application::new(None::<&str>, gtk::gio::ApplicationFlags::FLAGS_NONE);
 
-    app.connect_activate({
-        let gstreamer_manager_1 = Arc::clone(&gstreamer_manager_1);
-        move |app| {
-            create_ui(app, gstreamer_manager_1.clone())
-        }
+    app.connect_activate(|app| {
+        // let gstreamer_manager_1 = Arc::clone(&gstreamer_manager_1);
+        // move |app| {
+        //     create_ui(app, gstreamer_manager_1.clone())
+        // }
+
+        let window = gtk::ApplicationWindow::new(app);
+        
+        window.set_default_size(640, 480);
+        window.set_title(Some("Video Player"));
+
+        let player1 = VideoPlayer::new();
+        let player2 = VideoPlayer::new();
+
+
+        let container = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        container.append(&player1);
+        container.append(&player2);
+        
+        window.set_child(Some(&container));
+        app.add_window(&window);
+        
+        window.show();
+
     });
 
     // app.connect_activate({

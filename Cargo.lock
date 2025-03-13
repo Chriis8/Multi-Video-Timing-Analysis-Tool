@@ -439,6 +439,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "glib-build-tools"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7029c2651d9b5d5a3eea93ec8a1995665c6d3a69ce9bf6042ad9064d134736d8"
+dependencies = [
+ "gio 0.20.6",
+]
+
+[[package]]
 name = "glib-macros"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1032,6 +1041,7 @@ version = "0.1.0"
 dependencies = [
  "gio 0.18.4",
  "glib 0.18.5",
+ "glib-build-tools",
  "gst-plugin-gtk4",
  "gstreamer",
  "gstreamer-video",

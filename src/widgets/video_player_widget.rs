@@ -1,14 +1,19 @@
 use gtk::glib;
+use gtk::glib::property::PropertyGet;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::CompositeTemplate;
 
 mod imp {
+    use crate::video_pipeline;
+    
     use super::*;
     
     #[derive(CompositeTemplate, Default)]
     #[template(resource = "/videoplayer/video_player.ui")]
     pub struct VideoPlayer {
+        pub gstreamer_manager: std::sync::Arc<std::sync::Mutex<Option<crate::video_pipeline::VideoPipeline>>>,
+        
         #[template_child]
         pub vbox: TemplateChild<gtk::Box>,
 
@@ -43,14 +48,15 @@ mod imp {
         pub next_frame_button: TemplateChild<gtk::Button>,
 
         #[template_child]
-        pub test_button: TemplateChild<gtk::Button>
+        pub test_button: TemplateChild<gtk::Button>,
+
     }
 
     #[gtk::glib::object_subclass]
     impl ObjectSubclass for VideoPlayer {
         const NAME: &'static str = "VideoPlayer";
         type Type = super::VideoPlayer;
-        type ParentType = gtk::Box; // or gtk::Box if preferred
+        type ParentType = gtk::Box;
 
         fn class_init(klass: &mut Self::Class) {
             Self::bind_template(klass);
@@ -75,7 +81,15 @@ glib::wrapper! {
 
 impl VideoPlayer {
     pub fn new() -> Self {
+        let widget: Self = glib::Object::new::<Self>();
+
+        let imp = imp::VideoPlayer::from_obj(&widget);
+
+        if let Ok(mut pipeline) = imp.gstreamer_manager.lock() {
+            *pipeline = Some(crate::video_pipeline::VideoPipeline::new());
+        }
+
         eprint!("created video player widget");
-        glib::Object::new::<Self>()
+        widget
     }
 }

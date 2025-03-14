@@ -6,11 +6,12 @@
         <child>
             <object class="GtkBox" id="vbox">
                 <property name="spacing">10</property>
+                <property name="orientation">vertical</property>
 
                 <child>
                     <object class="GtkBox" id="hboxtop">
                         <property name="spacing">10</property>
-                        <property name="halign">GTK_ALIGN_CENTER</property>
+                        <property name="halign">center</property>
                         <property name="margin-top">20</property>
 
                         <child>

@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-glib = "0.18"
+glib = "0.20.6"
 gtk = { package = "gtk4", version = "0.9.4" }
-gio = "0.18"
+gio = "0.20.6"
 gstreamer = "0.23"
 gstreamer-video = "0.23"
 gstgtk4 = { package = "gst-plugin-gtk4", version = "0.13.3"}

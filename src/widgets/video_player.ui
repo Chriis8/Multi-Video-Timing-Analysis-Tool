@@ -16,6 +16,7 @@
 
                         <child>
                             <object class="GtkButton" id="fchooser">
+                                <signal name="clicked" handler="handle_fchooser_clicked" swapped="true"></signal>
                                 <property name="label">Open File</property>
                             </object>
                         </child>
@@ -44,30 +45,35 @@
 
                         <child>
                             <object class="GtkButton" id="previous_frame_button">
+                                <signal name="clicked" handler="handle_previous_frame_clicked" swapped="true"></signal>
                                 <property name="label">Preivous Frame</property>
                             </object>
                         </child>
 
                         <child>
                             <object class="GtkButton" id="play_button">
+                                <signal name="clicked" handler="handle_play_clicked" swapped="true"></signal>
                                 <property name="label">Play</property>
                             </object>
                         </child>
 
                         <child>
                             <object class="GtkButton" id="stop_button">
+                                <signal name="clicked" handler="handle_stop_clicked" swapped="true"></signal>
                                 <property name="label">Stop</property>
                             </object>
                         </child>
 
                         <child>
                             <object class="GtkButton" id="next_frame_button">
+                                <signal name="clicked" handler="handle_next_frame_clicked" swapped="true"></signal>
                                 <property name="label">Next Frame</property>
                             </object>
                         </child>
 
                         <child>
                             <object class="GtkButton" id="test_button">
+                                <signal name="clicked" handler="handle_test_clicked" swapped="true"></signal>
                                 <property name="label">Test</property>
                             </object>
                         </child>

@@ -1,7 +1,9 @@
 use gtk::glib;
-//use gtk::prelude::*;
+use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::CompositeTemplate;
+use std::sync::{Arc, Mutex};
+use crate::video_pipeline::VideoPipeline;
 
 mod imp {
     use gtk::{Button, Box, Label, Picture, template_callbacks};
@@ -10,7 +12,7 @@ mod imp {
     #[derive(CompositeTemplate, Default)]
     #[template(resource = "/videoplayer/video_player.ui")]
     pub struct VideoPlayer {
-        pub gstreamer_manager: std::sync::Arc<std::sync::Mutex<Option<crate::video_pipeline::VideoPipeline>>>,        
+        pub gstreamer_manager: Arc<Mutex<Option<VideoPipeline>>>,        
         
         #[template_child]
         pub vbox: TemplateChild<Box>,
@@ -53,6 +55,13 @@ mod imp {
     impl VideoPlayer {
         #[template_callback]
         fn handle_fchooser_clicked(&self, _button: &Button) {
+            glib::clone!(
+                #[weak(rename_to = gstman)] self.gstreamer_manager,
+                #[weak(rename_to = text)] self.text_view,
+                #[weak(rename_to = pic)] self.picture,
+                move || {
+                },
+            );
             eprintln!("fchooser clicked");
         }
     
@@ -86,7 +95,7 @@ mod imp {
     impl ObjectSubclass for VideoPlayer {
         const NAME: &'static str = "VideoPlayer";
         type Type = super::VideoPlayer;
-        type ParentType = gtk::Box;
+        type ParentType = gtk::Widget;
         
         fn class_init(klass: &mut Self::Class) {
             Self::bind_template(klass);
@@ -98,9 +107,39 @@ mod imp {
         }
     }
     
-    impl ObjectImpl for VideoPlayer {}
+    impl ObjectImpl for VideoPlayer {
+        fn constructed(&self) {
+            self.parent_constructed();
+
+            self.fchooser.connect_clicked(glib::clone!(
+                #[weak(rename_to = gstman)] self.gstreamer_manager,
+                #[weak(rename_to = text)] self.text_view,
+                #[weak(rename_to = pic)] self.picture,
+                #[weak(rename_to = win)] self.obj().ancestor(gtk::ApplicationWindow::static_type()).unwrap(),
+                move |fchooser| {
+                    let videos_filter = gtk::FileFilter::new();
+                    videos_filter.set_name(Some("Video Files"));
+                    videos_filter.add_pattern("*.mp4");   // MP4 format
+                    // Add additional video formats here
+
+                    let dialog = gtk::FileChooserDialog::builder()
+                        .title("Open File")
+                        .action(gtk::FileChooserAction::Open)
+                        .modal(true)
+                        .filter(&videos_filter)
+                        .build();
+                    dialog.add_button("Cancel", gtk::ResponseType::Cancel);
+                    dialog.add_button("Accept", gtk::ResponseType::Accept);
+                    if let Some(window) = win.downcast::<gtk::Window>().ok() {
+                        dialog.set_transient_for(Some(&window));
+                    }
+                }
+            ));
+        }
+
+
+    }
     impl WidgetImpl for VideoPlayer {}
-    impl BoxImpl for VideoPlayer {}
     
 }
 
@@ -117,11 +156,10 @@ impl VideoPlayer {
         let imp = imp::VideoPlayer::from_obj(&widget);
         
         if let Ok(mut pipeline) = imp.gstreamer_manager.lock() {
-            *pipeline = Some(crate::video_pipeline::VideoPipeline::new());
+            *pipeline = Some(VideoPipeline::new());
         }
-        
+
         eprint!("created video player widget");
         widget
     }
-    
 }

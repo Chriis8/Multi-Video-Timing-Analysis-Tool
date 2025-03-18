@@ -36,9 +36,12 @@ impl VideoPipeline {
         }
     }
 
-    pub fn reset(&mut self) {
+    pub fn cleanup(&mut self) {
         self.pipeline.set_state(gstreamer::State::Null).unwrap();
-        
+    }
+
+    pub fn reset(&mut self) {
+        self.cleanup();        
         *self = Self::new();
     }
 

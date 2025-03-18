@@ -41,6 +41,8 @@
                 <child>
                     <object class="GtkBox" id="hbox">
                         <property name="spacing">10</property>
+                        <property name="halign">center</property>
+                        <property name="margin-top">20</property>
 
                         <child>
                             <object class="GtkButton" id="previous_frame_button">

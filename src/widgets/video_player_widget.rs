@@ -6,13 +6,14 @@ use std::sync::{Arc, Mutex};
 use crate::video_pipeline::VideoPipeline;
 
 mod imp {
-    use gtk::{Button, Box, Label, Picture, template_callbacks};
+
+    use gtk::{Button, Box, Label, Picture};
     use super::*;
     
     #[derive(CompositeTemplate, Default)]
     #[template(resource = "/videoplayer/video_player.ui")]
     pub struct VideoPlayer {
-        pub gstreamer_manager: Arc<Mutex<Option<VideoPipeline>>>,        
+        pub gstreamer_manager: Arc<Mutex<Option<VideoPipeline>>>,
         
         #[template_child]
         pub vbox: TemplateChild<Box>,
@@ -67,36 +68,17 @@ mod imp {
     }
     
     impl ObjectImpl for VideoPlayer {
-        fn constructed(&self) {
-            self.parent_constructed();
-
-            // self.fchooser.connect_clicked(glib::clone!(
-            //     #[weak(rename_to = gstman)] self.gstreamer_manager,
-            //     #[weak(rename_to = text)] self.text_view,
-            //     #[weak(rename_to = pic)] self.picture,
-            //     #[weak(rename_to = win)] self.obj().ancestor(gtk::Window::static_type()).unwrap(),
-            //     move |fchooser| {
-            //         let videos_filter = gtk::FileFilter::new();
-            //         videos_filter.set_name(Some("Video Files"));
-            //         videos_filter.add_pattern("*.mp4");   // MP4 format
-            //         // Add additional video formats here
-
-            //         let dialog = gtk::FileChooserDialog::builder()
-            //             .title("Open File")
-            //             .action(gtk::FileChooserAction::Open)
-            //             .modal(true)
-            //             .filter(&videos_filter)
-            //             .build();
-            //         dialog.add_button("Cancel", gtk::ResponseType::Cancel);
-            //         dialog.add_button("Accept", gtk::ResponseType::Accept);
-            //         if let Some(window) = win.downcast::<gtk::Window>().ok() {
-            //             dialog.set_transient_for(Some(&window));
-            //         }
-            //     }
-            // ));
+        fn dispose(&self) {
+            if let Ok(mut guard) = self.gstreamer_manager.lock() {
+                if let Some(ref mut pipeline) = *guard {
+                    pipeline.cleanup();
+                } else {
+                    eprintln!("Can't cleanup pipeline");
+                }
+            } else {
+                eprintln!("Can't cleanup gstreamer_manager");
+            }
         }
-
-
     }
     impl WidgetImpl for VideoPlayer {}
     impl BoxImpl for VideoPlayer {}
@@ -127,13 +109,14 @@ impl VideoPlayer {
         let imp = imp::VideoPlayer::from_obj(self);
 
         eprintln!("Setting up buttons");
-
+        
+        let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
         imp.fchooser.connect_clicked(glib::clone!(
-            #[weak(rename_to = gstman)] imp.gstreamer_manager,
+            #[strong] gstman_weak,
             #[weak(rename_to = text)] imp.text_view,
             #[weak(rename_to = pic)] imp.picture,
             #[weak(rename_to = win)] imp.obj().ancestor(gtk::ApplicationWindow::static_type()).unwrap(),
-            move |fchooser| {
+            move |_| {
                 let videos_filter = gtk::FileFilter::new();
                 videos_filter.set_name(Some("Video Files"));
                 videos_filter.add_pattern("*.mp4");   // MP4 format
@@ -153,6 +136,7 @@ impl VideoPlayer {
                     eprintln!("OOOOOOOF");
                 }
 
+                let gstman_weak_clone = gstman_weak.clone();
                 dialog.run_async(move |obj, res| {
                     match res {
                         gtk::ResponseType::Accept => {
@@ -162,17 +146,19 @@ impl VideoPlayer {
                                 println!("from_str {from_str}");
                                 text.set_label(&from_str);
                                 println!("File accepted: {}", from_str);
-                                if let Ok(mut guard) = gstman.lock() {
-                                    if let Some(ref mut pipeline) = *guard {
-                                        pipeline.reset();
-                                        pipeline.build_pipeline(Some(&text.label().to_string()));
-                                        let paintable = pipeline.get_paintable();
-                                        pic.set_paintable(Some(&paintable));
+                                if let Some(gstman) = gstman_weak_clone.upgrade() {
+                                    if let Ok(mut guard) = gstman.lock() {
+                                        if let Some(ref mut pipeline) = *guard {
+                                            pipeline.reset();
+                                            pipeline.build_pipeline(Some(&text.label().to_string()));
+                                            let paintable = pipeline.get_paintable();
+                                            pic.set_paintable(Some(&paintable));
+                                        } else {
+                                            eprintln!("No Video Pipeline available");
+                                        }
                                     } else {
-                                        eprintln!("No Video Pipeline available");
+                                        eprintln!("Failed to aquire lock on Video pipeline");
                                     }
-                                } else {
-                                    eprintln!("Failed to aquire lock on Video pipeline");
                                 }
                             }
                         }
@@ -184,6 +170,100 @@ impl VideoPlayer {
                 });
             }
         ));
+
+        let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        imp.previous_frame_button.connect_clicked(glib::clone!(
+            #[strong] gstman_weak,
+            move |_| {
+                if let Some(gstman) = gstman_weak.upgrade() {
+                    if let Ok(mut guard) = gstman.lock() {
+                        if let Some(ref mut pipeline) = *guard {
+                            pipeline.frame_backward();
+                        } else {
+                            eprintln!("No Video Pipeline available");
+                        }
+                    } else {
+                        eprintln!("Failed to aquire lock on Video pipeline");
+                    }
+                }
+            }
+        ));
+        
+        let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        imp.play_button.connect_clicked(glib::clone!(
+            #[strong] gstman_weak,
+            move |_| {
+                if let Some(gstman) = gstman_weak.upgrade() {
+                    if let Ok(mut guard) = gstman.lock() {
+                        if let Some(ref mut pipeline) = *guard {
+                            pipeline.play_video();
+                            
+                        } else {
+                            eprintln!("No Video Pipeline available");
+                        }
+                    } else {
+                        eprintln!("Failed to aquire lock on Video pipeline");
+                    }
+                }
+            }
+        ));
+        
+        let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        imp.stop_button.connect_clicked(glib::clone!(
+            #[strong] gstman_weak,
+            move |_| {
+                if let Some(gstman) = gstman_weak.upgrade() {
+                    if let Ok(mut guard) = gstman.lock() {
+                        if let Some(ref mut pipeline) = *guard {
+                            pipeline.stop_video();
+                        } else {
+                            eprintln!("No Video Pipeline available");
+                        }
+                    } else {
+                        eprintln!("Failed to aquire lock on Video pipeline");
+                    }
+                }
+            }
+        ));
+        
+        let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        imp.next_frame_button.connect_clicked(glib::clone!(
+            #[strong] gstman_weak,
+            move |_| {
+                if let Some(gstman) = gstman_weak.upgrade() {
+                    if let Ok(mut guard) = gstman.lock() {
+                        if let Some(ref mut pipeline) = *guard {
+                            pipeline.frame_forward();
+                        } else {
+                            eprintln!("No Video Pipeline available");
+                        }
+                    } else {
+                        eprintln!("Failed to aquire lock on Video pipeline");
+                    }
+                }
+            }
+        ));
+        
+        let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        imp.test_button.connect_clicked(glib::clone!(
+            #[strong] gstman_weak,
+            move |_| {
+                if let Some(gstman) = gstman_weak.upgrade() {
+                    if let Ok(mut guard) = gstman.lock() {
+                        if let Some(ref mut pipeline) = *guard {
+                            eprintln!("Testing");
+                            pipeline.get_current_frame();
+                        } else {
+                            eprintln!("No Video Pipeline available");
+                        }
+                    } else {
+                        eprintln!("Failed to aquire lock on Video pipeline");
+                    }
+                }
+            }
+        ));
+
+
         
     }
 }

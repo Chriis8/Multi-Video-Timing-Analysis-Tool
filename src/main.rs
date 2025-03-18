@@ -214,38 +214,41 @@ fn main() -> glib::ExitCode {
     gio::resources_register_include!("video_player.gresource")
         .expect("Failed to register resources.");
 
-    let gstreamer_manager_1 = Arc::new(RefCell::new(video_pipeline::VideoPipeline::new()));
+    //let gstreamer_manager_1 = Arc::new(RefCell::new(video_pipeline::VideoPipeline::new()));
     //let gstreamer_manager_2 = Arc::new(RefCell::new(video_pipeline::VideoPipeline::new()));
     
     let app = gtk::Application::new(None::<&str>, gtk::gio::ApplicationFlags::FLAGS_NONE);
 
-    app.connect_activate(move |app| {
-        create_ui(app, gstreamer_manager_1.clone())
-    });
-    // app.connect_activate(|app| {
-    //     let gstreamer_manager_1 = Arc::clone(&gstreamer_manager_1);
-        
-    //     // move |app| {
-    //     //     create_ui(app, gstreamer_manager_1.clone())
-    //     // }
-
-    //     let window = gtk::ApplicationWindow::new(app);
-        
-    //     window.set_default_size(640, 480);
-    //     window.set_title(Some("Video Player"));
-
-    //     let player1 = VideoPlayer::new();
-
-
-    //     let container = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-    //     container.append(&player1);
-        
-    //     window.set_child(Some(&container));
-    //     app.add_window(&window);
-        
-    //     window.show();
-
+    // app.connect_activate(move |app| {
+    //     create_ui(app, gstreamer_manager_1.clone())
     // });
+    app.connect_activate(|app| {
+        //let gstreamer_manager_1 = Arc::clone(&gstreamer_manager_1);
+        
+        // move |app| {
+        //     create_ui(app, gstreamer_manager_1.clone())
+        // }
+
+        let window = gtk::ApplicationWindow::new(app);
+        
+        window.set_default_size(640, 480);
+        window.set_title(Some("Video Player"));
+
+        let player1 = VideoPlayer::new();
+
+
+        let container = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        container.append(&player1);
+        
+        window.set_child(Some(&container));
+
+        player1.setup_event_handlers();
+
+        app.add_window(&window);
+        
+        window.show();
+
+    });
 
     // app.connect_activate({
     //     let gstreamer_manager_2 = Arc::clone(&gstreamer_manager_2);

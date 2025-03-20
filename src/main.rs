@@ -24,13 +24,16 @@ fn main() -> glib::ExitCode {
         window.set_title(Some("Video Player"));
 
         let player1 = VideoPlayer::new();
+        let player2 = VideoPlayer::new();
 
-        let container = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        let container = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         container.append(&player1);
+        container.append(&player2);
         
         window.set_child(Some(&container));
 
         player1.setup_event_handlers();
+        player2.setup_event_handlers();
 
         app.add_window(&window);
         

@@ -7,7 +7,7 @@ use crate::video_pipeline::VideoPipeline;
 
 mod imp {
 
-    use gtk::{Button, Box, Label, Picture};
+    use gtk::{ffi::{gtk_adjustment_new, GTK_POS_TOP}, subclass::adjustment, Box, Button, Label, Picture, Scale};
     use super::*;
     
     #[derive(CompositeTemplate, Default)]
@@ -29,6 +29,9 @@ mod imp {
 
         #[template_child]
         pub picture: TemplateChild<Picture>,
+
+        #[template_child]
+        pub seek_bar: TemplateChild<Scale>,
 
         #[template_child]
         pub label: TemplateChild<Label>,
@@ -66,6 +69,16 @@ mod imp {
             obj.init_template();
         }
     }
+
+    impl VideoPlayer {
+        fn setup_seek_bar(&self) {
+            eprintln!("Setting up seek bar!");
+
+            let adjustment = gtk::Adjustment::new(0.0, 0.0, 100.0, 1.0, 10.0, 0.0);
+            self.seek_bar.set_adjustment(&adjustment);
+            self.seek_bar.add_mark(0.0, gtk::PositionType::Top, None);
+        }
+    }
     
     impl ObjectImpl for VideoPlayer {
         fn dispose(&self) {
@@ -78,6 +91,10 @@ mod imp {
             } else {
                 eprintln!("Can't cleanup gstreamer_manager");
             }
+        }
+
+        fn constructed(&self) {
+            self.setup_seek_bar();
         }
     }
     impl WidgetImpl for VideoPlayer {}
@@ -101,7 +118,7 @@ impl VideoPlayer {
             *pipeline = Some(VideoPipeline::new());
         }
 
-        eprint!("created video player widget");
+        eprintln!("created video player widget");
         widget
     }
 

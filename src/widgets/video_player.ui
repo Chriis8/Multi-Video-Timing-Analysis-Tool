@@ -42,6 +42,13 @@
                 </child>
 
                 <child>
+                    <object class="GtkScale" id="seek_bar">
+                        <property name="draw-value">true</property>
+                    
+                    </object>
+                </child>
+
+                <child>
                     <object class="GtkLabel" id="label">
                         <property name="label">Position: 00:00:00</property>
                     </object>

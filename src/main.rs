@@ -36,7 +36,7 @@ fn main() -> glib::ExitCode {
         player2.setup_event_handlers();
 
         app.add_window(&window);
-        
+
         window.show();
     });
 

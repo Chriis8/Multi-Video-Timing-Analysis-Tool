@@ -1,13 +1,17 @@
+use glib::timeout_add_local;
+use gstreamer::prelude::ElementExt;
+use gstreamer::prelude::ElementExtManual;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::CompositeTemplate;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use crate::video_pipeline::VideoPipeline;
 
 mod imp {
 
-    use gtk::{ffi::{gtk_adjustment_new, GTK_POS_TOP}, subclass::adjustment, Box, Button, Label, Picture, Scale};
+    use gtk::{Box, Button, Label, Picture, Scale};
     use super::*;
     
     #[derive(CompositeTemplate, Default)]
@@ -29,6 +33,9 @@ mod imp {
 
         #[template_child]
         pub picture: TemplateChild<Picture>,
+
+        #[template_child]
+        pub scale_parent: TemplateChild<Box>,
 
         #[template_child]
         pub seek_bar: TemplateChild<Scale>,
@@ -74,9 +81,9 @@ mod imp {
         fn setup_seek_bar(&self) {
             eprintln!("Setting up seek bar!");
 
-            let adjustment = gtk::Adjustment::new(0.0, 0.0, 100.0, 1.0, 10.0, 0.0);
+            let adjustment = gtk::Adjustment::new(0.0, 0.0, 100.0, 1.0, 0.0, 0.0);
             self.seek_bar.set_adjustment(&adjustment);
-            self.seek_bar.add_mark(0.0, gtk::PositionType::Top, None);
+            //self.seek_bar.add_mark(10.0, gtk::PositionType::Right, None);
         }
     }
     
@@ -120,6 +127,57 @@ impl VideoPlayer {
 
         eprintln!("created video player widget");
         widget
+    }
+
+    // fn start_updating_scale(scale: gtk::Scale, pipeline: gstreamer::Pipeline) {
+    //     timeout_add_local(Duration::from_millis(500), move || {
+    //         if let Some(position) = pipeline.query_position::<gstreamer::ClockTime>() {
+    //             let pos_secs = position.seconds() as f64;
+    //             scale.set_value(pos_secs);
+    //         }
+    //         glib::ControlFlow::Continue
+    //     });
+    // }
+
+    fn start_updating_scale() {
+        timeout_add_local(Duration::from_millis(500), move || {
+            //eprintln!("---------------------Updating Scale");
+            glib::ControlFlow::Continue
+        });
+    }
+
+    // fn connect_scale_signals(scale: &gtk::Scale, pipeline: &gstreamer::Pipeline) {
+    //     let pipeline_weak = pipeline.downgrade();
+
+    //     scale.connect_change_value(move |_, _, value| {
+    //         if let Some(pipeline) = pipeline_weak.upgrade() {
+    //             let nanos = (value * 1000000000.0) as u64;
+    //             let _ = pipeline.seek_simple(gstreamer::SeekFlags::FLUSH, gstreamer::ClockTime::from_nseconds(nanos));
+    //         }
+    //         glib::Propagation::Proceed
+    //     });
+    // }
+
+    fn connect_scale_signals(scale: &gtk::Scale) {
+        scale.connect_change_value(move |_, _, _| {
+            //eprintln!("---------------------Scale Signal");
+            glib::Propagation::Proceed
+        });
+    }
+
+    fn connect_scale_drag_signals(scale_box: &gtk::Box) {
+
+        let gesture = gtk::GestureClick::new();
+
+        gesture.connect_pressed(|_,_,x,y| {
+            eprintln!("---------------------Drag Begin at: x: {x}, y: {y}");
+        });
+
+        gesture.connect_released(|_,_,x,y| {
+            eprintln!("---------------------Drag End a: x: {x}, y: {y}");
+        });
+        gesture.set_propagation_phase(gtk::PropagationPhase::Capture);
+        scale_box.add_controller(gesture);
     }
 
     pub fn setup_event_handlers(&self) {
@@ -279,6 +337,10 @@ impl VideoPlayer {
                 }
             }
         ));
+
+        Self::start_updating_scale();
+        Self::connect_scale_signals(&imp.seek_bar);
+        Self::connect_scale_drag_signals(&imp.scale_parent);
 
 
         

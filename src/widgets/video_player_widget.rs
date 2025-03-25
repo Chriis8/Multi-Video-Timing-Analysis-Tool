@@ -1,10 +1,10 @@
 use glib::timeout_add_local;
-use gstreamer::prelude::ElementExt;
-use gstreamer::prelude::ElementExtManual;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::CompositeTemplate;
+use gtk::CssProvider;
+use gtk::gdk::Display;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use crate::video_pipeline::VideoPipeline;
@@ -170,14 +170,33 @@ impl VideoPlayer {
         let gesture = gtk::GestureClick::new();
 
         gesture.connect_pressed(|_,_,x,y| {
-            eprintln!("---------------------Drag Begin at: x: {x}, y: {y}");
+            eprintln!("---------------------Left click Begin at: x: {x}, y: {y}");
         });
 
         gesture.connect_released(|_,_,x,y| {
-            eprintln!("---------------------Drag End a: x: {x}, y: {y}");
+            eprintln!("---------------------Left click Ends at: x: {x}, y: {y}");
         });
+
         gesture.set_propagation_phase(gtk::PropagationPhase::Capture);
         scale_box.add_controller(gesture);
+    }
+
+    fn load_css() {
+        let provider = CssProvider::new();
+        match std::env::current_dir() {
+            Ok(current_dir) => {
+                let file = gio::File::for_path(current_dir.join("src\\widgets\\style.css"));
+                provider.load_from_file(&file);
+            }
+            Err(e) => {
+                eprintln!("Failed to get current working directory to load css");
+            }
+        }
+
+
+        if let Some(display) = Display::default() {
+            gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        }
     }
 
     pub fn setup_event_handlers(&self) {
@@ -341,6 +360,7 @@ impl VideoPlayer {
         Self::start_updating_scale();
         Self::connect_scale_signals(&imp.seek_bar);
         Self::connect_scale_drag_signals(&imp.scale_parent);
+        Self::load_css();
 
 
         

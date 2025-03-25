@@ -42,13 +42,14 @@
 
                 <child>
                     <object class="GtkBox" id="scale_parent">
-                        <property name="spacing">10</property>
+                        <style><class name="seek-bar-box"></class></style>
                         <property name="hexpand">true</property>
-                        <property name="height-request">50</property>
+                        <property name="vexpand">false</property>
                         <child>
                             <object class="GtkScale" id="seek_bar">
-                                <property name="draw-value">true</property>
-                                <property name="hexpand">true</property> 
+                            <style><class name="seek-bar"></class></style>
+                                <property name="hexpand">true</property>
+                                <property name="vexpand">false</property>
                             </object>
                         </child>
                     </object>

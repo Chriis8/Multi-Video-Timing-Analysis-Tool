@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use gstreamer::{event::{self, Seek, Step}, prelude::*, Fraction, SeekFlags, SeekType};
+use gstreamer::{event::{Seek, Step}, prelude::*, ClockTime, SeekFlags, SeekType};
 use gtk;
 use gtk::gdk;
 
@@ -45,7 +45,8 @@ impl VideoPipeline {
         *self = Self::new();
     }
 
-    fn send_seek_event(&self, rate: f64) -> bool {
+    fn set_rate(&self, rate: f64) -> bool {
+    
         eprintln!("---------- (Send seek event Before) video time: {:?}", self.pipeline.query_position::<gstreamer::ClockTime>());
         let position = match self.pipeline.query_position::<gstreamer::ClockTime>() {
             Some(pos) => pos,
@@ -77,6 +78,26 @@ impl VideoPipeline {
         self.pipeline.send_event(seek_event);
         eprintln!("---------- (Send seek event After) video time: {:?}", self.pipeline.query_position::<gstreamer::ClockTime>());
         true
+    }
+
+    pub fn seek_position(&self, position: gstreamer::ClockTime) -> Result<(), glib::BoolError> {
+        self.pipeline.seek_simple(gstreamer::SeekFlags::FLUSH, position)
+    }
+
+    pub fn percent_to_position(&self, percent: f64) -> Result<u64, glib::Error> {
+        let total_duration = match self.pipeline.query_duration::<gstreamer::ClockTime>() {
+            Some(dur) => dur.nseconds(),
+            None => {
+                eprintln!("Unable to get current duration");
+                return Err(glib::Error::new(glib::FileError::Failed, "Unable to get pipeline duration"));
+            }
+        };
+
+        println!("Duration: {total_duration}");
+        println!("Percent: {percent}");
+
+        let new_position = (total_duration as f64 * percent) as u64;
+        Ok(new_position)
     }
 
     pub fn build_pipeline(&self, uri: Option<&str>) {
@@ -195,7 +216,7 @@ impl VideoPipeline {
     }
 
     pub fn play_video(&self) {
-        let (success,current_state,_) = self.pipeline.state(gstreamer::ClockTime::NONE);
+        let (_,current_state,_) = self.pipeline.state(gstreamer::ClockTime::NONE);
         let new_state = match current_state {
             gstreamer::State::Null => return,
             gstreamer::State::Playing => gstreamer::State::Paused,
@@ -204,7 +225,7 @@ impl VideoPipeline {
 
         let mut state = self.state.borrow_mut();
         if new_state == gstreamer::State::Playing && state.direction == PlaybackDirection::Reverse {
-            self.send_seek_event(1.);
+            self.set_rate(1.);
             state.direction = PlaybackDirection::Forward;
         }
 
@@ -232,7 +253,7 @@ impl VideoPipeline {
         }
         let mut state = self.state.borrow_mut();
         if state.direction == PlaybackDirection::Reverse {
-            self.send_seek_event(1.);
+            self.set_rate(1.);
             state.direction = PlaybackDirection::Forward;
         }
         let step_event = Step::new(gstreamer::format::Buffers::ONE, 1.0, true, false);
@@ -252,7 +273,7 @@ impl VideoPipeline {
         }
         let mut state = self.state.borrow_mut();
         if state.direction == PlaybackDirection::Forward {
-            self.send_seek_event(-1.);
+            self.set_rate(-1.);
             state.direction = PlaybackDirection::Reverse;
         }
         let step_event = Step::new(gstreamer::format::Buffers::ONE, 1.0, true, false);

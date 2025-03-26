@@ -79,7 +79,7 @@ mod imp {
 
     impl VideoPlayer {
         fn setup_seek_bar(&self) {
-            eprintln!("Setting up seek bar!");
+            println!("Setting up seek bar!");
 
             let adjustment = gtk::Adjustment::new(0.0, 0.0, 100.0, 1.0, 0.0, 0.0);
             self.seek_bar.set_adjustment(&adjustment);
@@ -125,7 +125,7 @@ impl VideoPlayer {
             *pipeline = Some(VideoPipeline::new());
         }
 
-        eprintln!("created video player widget");
+        println!("created video player widget");
         widget
     }
 
@@ -141,41 +141,41 @@ impl VideoPlayer {
 
     fn start_updating_scale() {
         timeout_add_local(Duration::from_millis(500), move || {
-            //eprintln!("---------------------Updating Scale");
+            //println!("---------------------Updating Scale");
             glib::ControlFlow::Continue
         });
     }
 
-    // fn connect_scale_signals(scale: &gtk::Scale, pipeline: &gstreamer::Pipeline) {
-    //     let pipeline_weak = pipeline.downgrade();
-
-    //     scale.connect_change_value(move |_, _, value| {
-    //         if let Some(pipeline) = pipeline_weak.upgrade() {
-    //             let nanos = (value * 1000000000.0) as u64;
-    //             let _ = pipeline.seek_simple(gstreamer::SeekFlags::FLUSH, gstreamer::ClockTime::from_nseconds(nanos));
-    //         }
-    //         glib::Propagation::Proceed
-    //     });
-    // }
-
-    fn connect_scale_signals(scale: &gtk::Scale) {
-        scale.connect_change_value(move |_, _, _| {
-            //eprintln!("---------------------Scale Signal");
-            glib::Propagation::Proceed
-        });
+    fn update_scale_value(&self, x: f64) {
+        let imp = imp::VideoPlayer::from_obj(self);
+        let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        if let Some(gstman) = gstman_weak.upgrade() {
+            if let Ok(mut guard) = gstman.lock() {
+                if let Some(ref mut pipeline) = *guard {
+                    let percent = imp.seek_bar.value() / 100.0;
+                    let position = pipeline.percent_to_position(percent).expect("Failed to get position");
+                    println!("Position: {position}");
+                    pipeline.seek_position(gstreamer::ClockTime::from_nseconds(position)).expect("Failed to seek position");
+                }
+            }
+        }
     }
 
-    fn connect_scale_drag_signals(scale_box: &gtk::Box) {
+    fn connect_scale_drag_signals(&self, scale_box: &gtk::Box) {
 
         let gesture = gtk::GestureClick::new();
 
         gesture.connect_pressed(|_,_,x,y| {
-            eprintln!("---------------------Left click Begin at: x: {x}, y: {y}");
+            println!("---------------------Left click Begin at: x: {x}, y: {y}");
         });
 
-        gesture.connect_released(|_,_,x,y| {
-            eprintln!("---------------------Left click Ends at: x: {x}, y: {y}");
-        });
+        gesture.connect_released(glib::clone!(
+            #[weak(rename_to = this)] self,
+            move |_,_,x,y| {
+                println!("---------------------Left click Ends at: x: {x}, y: {y}");
+                this.update_scale_value(x);
+            }
+        ));
 
         gesture.set_propagation_phase(gtk::PropagationPhase::Capture);
         scale_box.add_controller(gesture);
@@ -189,7 +189,7 @@ impl VideoPlayer {
                 provider.load_from_file(&file);
             }
             Err(e) => {
-                eprintln!("Failed to get current working directory to load css");
+                eprintln!("Failed to get current working directory to load css ({e})");
             }
         }
 
@@ -202,7 +202,7 @@ impl VideoPlayer {
     pub fn setup_event_handlers(&self) {
         let imp = imp::VideoPlayer::from_obj(self);
 
-        eprintln!("Setting up buttons");
+        println!("Setting up buttons");
         
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
         imp.fchooser.connect_clicked(glib::clone!(
@@ -257,7 +257,7 @@ impl VideoPlayer {
                             }
                         }
                         _ => {
-                            println!("No file selected");
+                            eprintln!("No file selected");
                         }
                     }
                     obj.destroy();
@@ -345,7 +345,7 @@ impl VideoPlayer {
                 if let Some(gstman) = gstman_weak.upgrade() {
                     if let Ok(mut guard) = gstman.lock() {
                         if let Some(ref mut pipeline) = *guard {
-                            eprintln!("Testing");
+                            println!("Testing");
                             pipeline.get_current_frame();
                         } else {
                             eprintln!("No Video Pipeline available");
@@ -358,8 +358,10 @@ impl VideoPlayer {
         ));
 
         Self::start_updating_scale();
-        Self::connect_scale_signals(&imp.seek_bar);
-        Self::connect_scale_drag_signals(&imp.scale_parent);
+
+        //let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        //Self::connect_scale_signals(&imp.seek_bar, gstman_weak);
+        Self::connect_scale_drag_signals(self,&imp.scale_parent);
         Self::load_css();
 
 

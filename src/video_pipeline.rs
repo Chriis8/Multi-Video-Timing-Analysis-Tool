@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use gstreamer::{event::{Seek, Step}, prelude::*, ClockTime, SeekFlags, SeekType};
+use gstreamer::{event::{Seek, Step}, prelude::*, SeekFlags, SeekType};
 use gtk;
 use gtk::gdk;
 
@@ -82,6 +82,31 @@ impl VideoPipeline {
 
     pub fn seek_position(&self, position: gstreamer::ClockTime) -> Result<(), glib::BoolError> {
         self.pipeline.seek_simple(gstreamer::SeekFlags::FLUSH, position)
+    }
+
+    pub fn position_to_percent(&self) -> Result<f64, glib::Error> {
+        let position = match self.pipeline.query_position::<gstreamer::ClockTime>() {
+            Some(pos) => pos,
+            None => {
+                eprintln!("Failed to get pipeline position");
+                return Err(glib::Error::new(glib::FileError::Failed, "Failed to get pipeline position"));
+            }
+        };
+
+        let total_duration = match self.pipeline.query_duration::<gstreamer::ClockTime>() {
+            Some(dur) => dur,
+            None => {
+                eprintln!("Unable to get current duration");
+                return Err(glib::Error::new(glib::FileError::Failed, "Unable to get pipeline duration"));
+            }
+        };
+
+        let position_ns = position.nseconds();
+        let duration_ns = total_duration.nseconds();
+
+        let percent = position_ns as f64 / duration_ns as f64 * 100.0;
+        
+        Ok(percent)
     }
 
     pub fn percent_to_position(&self, percent: f64) -> Result<u64, glib::Error> {

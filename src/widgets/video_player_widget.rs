@@ -8,6 +8,8 @@ use gtk::gdk::Display;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use crate::video_pipeline::VideoPipeline;
+use std::rc::Rc;
+use std::cell::{Cell, RefCell};
 
 mod imp {
 
@@ -18,6 +20,10 @@ mod imp {
     #[template(resource = "/videoplayer/video_player.ui")]
     pub struct VideoPlayer {
         pub gstreamer_manager: Arc<Mutex<Option<VideoPipeline>>>,
+
+        pub timeout_id: Rc<RefCell<Option<glib::SourceId>>>,
+        
+        pub is_dragging: Rc<Cell<bool>>,
         
         #[template_child]
         pub vbox: TemplateChild<Box>,
@@ -129,24 +135,35 @@ impl VideoPlayer {
         widget
     }
 
-    // fn start_updating_scale(scale: gtk::Scale, pipeline: gstreamer::Pipeline) {
-    //     timeout_add_local(Duration::from_millis(500), move || {
-    //         if let Some(position) = pipeline.query_position::<gstreamer::ClockTime>() {
-    //             let pos_secs = position.seconds() as f64;
-    //             scale.set_value(pos_secs);
-    //         }
-    //         glib::ControlFlow::Continue
-    //     });
-    // }
-
-    fn start_updating_scale() {
-        timeout_add_local(Duration::from_millis(500), move || {
-            //println!("---------------------Updating Scale");
+    fn start_updating_scale(&self, scale: &gtk::Scale) {
+        println!("Starting to update the seek bar");
+        let imp = imp::VideoPlayer::from_obj(self);
+        let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        let seek_bar_clone = scale.clone();
+        let is_dragging_clone = imp.is_dragging.clone();
+        let source_id = timeout_add_local(Duration::from_millis(500), move || {
+            if is_dragging_clone.get() {
+                println!("Dragging, skipping update scale");
+                return glib::ControlFlow::Continue
+            }
+            if let Some(gstman) = gstman_weak.upgrade() {
+                if let Ok(mut guard) = gstman.lock() {
+                    if let Some(ref mut pipeline) = *guard {
+                        if let Ok(new_value) = pipeline.position_to_percent() {
+                            println!("New Value: {new_value}");
+                            seek_bar_clone.set_value(new_value);
+                        } else {
+                            eprintln!("Pipeline not ready");
+                        }
+                    }
+                }
+            }
             glib::ControlFlow::Continue
         });
+        *imp.timeout_id.borrow_mut() = Some(source_id);
     }
 
-    fn update_scale_value(&self, x: f64) {
+    fn update_scale_value(&self) {
         let imp = imp::VideoPlayer::from_obj(self);
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
         if let Some(gstman) = gstman_weak.upgrade() {
@@ -163,17 +180,24 @@ impl VideoPlayer {
 
     fn connect_scale_drag_signals(&self, scale_box: &gtk::Box) {
 
-        let gesture = gtk::GestureClick::new();
+        let imp = imp::VideoPlayer::from_obj(self);
 
-        gesture.connect_pressed(|_,_,x,y| {
-            println!("---------------------Left click Begin at: x: {x}, y: {y}");
-        });
+        let gesture = gtk::GestureClick::new();
+        gesture.connect_pressed(glib::clone!(
+            #[weak(rename_to = is_dragging_weak)] imp.is_dragging,
+            move |_,_,x,y| {
+                println!("---------------------Left click Begin at: x: {x}, y: {y}");
+                is_dragging_weak.set(true);
+            }
+        ));
 
         gesture.connect_released(glib::clone!(
             #[weak(rename_to = this)] self,
+            #[weak(rename_to = is_dragging_weak)] imp.is_dragging,
             move |_,_,x,y| {
                 println!("---------------------Left click Ends at: x: {x}, y: {y}");
-                this.update_scale_value(x);
+                this.update_scale_value();
+                is_dragging_weak.set(false);                
             }
         ));
 
@@ -203,13 +227,14 @@ impl VideoPlayer {
         let imp = imp::VideoPlayer::from_obj(self);
 
         println!("Setting up buttons");
-        
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
         imp.fchooser.connect_clicked(glib::clone!(
             #[strong] gstman_weak,
             #[weak(rename_to = text)] imp.text_view,
             #[weak(rename_to = pic)] imp.picture,
             #[weak(rename_to = win)] imp.obj().ancestor(gtk::ApplicationWindow::static_type()).unwrap(),
+            #[weak(rename_to = this)] self,
+            #[weak(rename_to = scale)] imp.seek_bar,
             move |_| {
                 let videos_filter = gtk::FileFilter::new();
                 videos_filter.set_name(Some("Video Files"));
@@ -247,6 +272,7 @@ impl VideoPlayer {
                                             pipeline.build_pipeline(Some(&text.label().to_string()));
                                             let paintable = pipeline.get_paintable();
                                             pic.set_paintable(Some(&paintable));
+                                            this.start_updating_scale(&scale);
                                         } else {
                                             eprintln!("No Video Pipeline available");
                                         }
@@ -305,7 +331,11 @@ impl VideoPlayer {
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
         imp.stop_button.connect_clicked(glib::clone!(
             #[strong] gstman_weak,
+            #[weak(rename_to = timeout_id)] imp.timeout_id,
             move |_| {
+                if let Some(id) = timeout_id.borrow_mut().take() {
+                    id.remove();
+                }     
                 if let Some(gstman) = gstman_weak.upgrade() {
                     if let Ok(mut guard) = gstman.lock() {
                         if let Some(ref mut pipeline) = *guard {
@@ -341,23 +371,12 @@ impl VideoPlayer {
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
         imp.test_button.connect_clicked(glib::clone!(
             #[strong] gstman_weak,
+            #[weak(rename_to = scale)] imp.seek_bar,
+            #[weak(rename_to = this)] self,
             move |_| {
-                if let Some(gstman) = gstman_weak.upgrade() {
-                    if let Ok(mut guard) = gstman.lock() {
-                        if let Some(ref mut pipeline) = *guard {
-                            println!("Testing");
-                            pipeline.get_current_frame();
-                        } else {
-                            eprintln!("No Video Pipeline available");
-                        }
-                    } else {
-                        eprintln!("Failed to aquire lock on Video pipeline");
-                    }
-                }
+                this.start_updating_scale(&scale);
             }
         ));
-
-        Self::start_updating_scale();
 
         //let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
         //Self::connect_scale_signals(&imp.seek_bar, gstman_weak);

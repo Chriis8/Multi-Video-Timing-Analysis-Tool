@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+    <object class="GtkApplicationWindow" id="main_window">
+        <property name="default-width">800</property>
+        <property name="default-height">600</property>
+        <child>
+            <object class="GtkBox" id="container">
+                <style><class name="container"></class></style>
+                <property name="orientation">vertical</property>
+                <property name="spacing">10</property>
+                <child>
+                    <object class="GtkBox" id="main_box">
+                        <style><class name="main-box"></class></style>
+                        <property name="orientation">horizontal</property>
+                        <property name="spacing">10</property>
+                        <child>
+                            <object class="GtkBox" id="video_container">
+                                <style><class name="video-container"></class></style>
+                                <property name="vexpand">true</property>
+                                <property name="width-request">600</property>
+                                <property name="orientation">horizontal</property>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkBox" id="split_container">
+                                <style><class name="split-container"></class></style>
+                                <property name="vexpand">true</property>
+                                <property name="width-request">200</property>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+                <child>
+                    <object class="GtkBox" id="bottom_container">
+                        <style><class name="bottom-container"></class></style>
+                        <property name="hexpand">true</property>
+                        <property name="height-request">100</property>
+                    </object>
+                </child>
+            </object>
+        </child>
+    </object>
+</interface>

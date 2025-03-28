@@ -14,10 +14,12 @@ use std::cell::{Cell, RefCell};
 mod imp {
 
     use gtk::{Box, Button, Label, Picture, Scale};
+    use crate::widgets::video_player_widget::video_player;
+
     use super::*;
     
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/videoplayer/video_player.ui")]
+    #[template(resource = "/videoplayer/vplayer.ui")]
     pub struct VideoPlayer {
         pub gstreamer_manager: Arc<Mutex<Option<VideoPipeline>>>,
 
@@ -71,7 +73,7 @@ mod imp {
     #[gtk::glib::object_subclass]
     impl ObjectSubclass for VideoPlayer {
         const NAME: &'static str = "VideoPlayer";
-        type Type = super::VideoPlayer;
+        type Type = video_player::VideoPlayer;
         type ParentType = gtk::Box;
         
         fn class_init(klass: &mut Self::Class) {
@@ -209,21 +211,19 @@ impl VideoPlayer {
         let provider = CssProvider::new();
         match std::env::current_dir() {
             Ok(current_dir) => {
-                let file = gio::File::for_path(current_dir.join("src\\widgets\\style.css"));
+                let file = gio::File::for_path(current_dir.join("src\\widgets\\video_player_widget\\style.css"));
                 provider.load_from_file(&file);
             }
             Err(e) => {
                 eprintln!("Failed to get current working directory to load css ({e})");
             }
         }
-
-
         if let Some(display) = Display::default() {
             gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
         }
     }
 
-    pub fn setup_event_handlers(&self) {
+    pub fn setup_event_handlers(&self, window: gtk::ApplicationWindow) {
         let imp = imp::VideoPlayer::from_obj(self);
 
         println!("Setting up buttons");
@@ -232,7 +232,7 @@ impl VideoPlayer {
             #[strong] gstman_weak,
             #[weak(rename_to = text)] imp.text_view,
             #[weak(rename_to = pic)] imp.picture,
-            #[weak(rename_to = win)] imp.obj().ancestor(gtk::ApplicationWindow::static_type()).unwrap(),
+            #[weak(rename_to = win)] window,
             #[weak(rename_to = this)] self,
             #[weak(rename_to = scale)] imp.seek_bar,
             move |_| {

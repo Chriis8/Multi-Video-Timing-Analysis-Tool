@@ -3,8 +3,12 @@ fn main() {
     println!("cargo:warning=OUT_DIR is: {}", out_dir);
     
     glib_build_tools::compile_resources(
-        &["src/widgets"], 
-        "src/widgets/video_player.gresource.xml", 
-        "video_player.gresource");
+        &["src/widgets/video_player_widget"], 
+        "src/widgets/video_player_widget/vplayer.gresource.xml", 
+        "vplayer.gresource");
+
+    glib_build_tools::compile_resources(&["src/widgets/main_window"], 
+        "src/widgets/main_window/mwindow.gresource.xml",
+        "mwindow.gresource");
     
 }

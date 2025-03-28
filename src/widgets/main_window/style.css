@@ -1,0 +1,19 @@
+.container {
+    background-color: black;
+}
+
+.main-box {
+    background-color: white
+}
+
+.video-container {
+    background-color:crimson;
+}
+
+.split-container {
+    background-color: yellow;
+}
+
+.bottom-container {
+    background: rgb(77, 178, 211);
+}

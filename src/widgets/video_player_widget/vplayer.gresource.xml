@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
   <gresource prefix="/videoplayer">
-    <file>video_player.ui</file>
+    <file>vplayer.ui</file>
   </gresource>
 </gresources>

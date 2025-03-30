@@ -3,7 +3,7 @@
 }
 
 .main-box {
-    background-color: white
+    background-color: white;
 }
 
 .video-container {
@@ -16,4 +16,12 @@
 
 .bottom-container {
     background: rgb(77, 178, 211);
+}
+
+.new-video-player-button {
+    background-color: chartreuse;
+    border-radius: 0px;
+    border: none;
+    padding: 0px;
+    min-width: 10px;
 }

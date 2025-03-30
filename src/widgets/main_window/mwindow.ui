@@ -12,13 +12,18 @@
                     <object class="GtkBox" id="main_box">
                         <style><class name="main-box"></class></style>
                         <property name="orientation">horizontal</property>
-                        <property name="spacing">10</property>
                         <child>
                             <object class="GtkBox" id="video_container">
                                 <style><class name="video-container"></class></style>
                                 <property name="vexpand">true</property>
                                 <property name="width-request">600</property>
                                 <property name="orientation">horizontal</property>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkButton" id="new_video_player_button">
+                                <style><class name="new-video-player-button"></class></style>
+                                <property name="vexpand">true</property>
                             </object>
                         </child>
                         <child>

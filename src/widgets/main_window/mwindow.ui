@@ -26,11 +26,43 @@
                                 <property name="vexpand">true</property>
                             </object>
                         </child>
+
                         <child>
-                            <object class="GtkBox" id="split_container">
-                                <style><class name="split-container"></class></style>
+                            <object class="GtkButton" id="add_column_button">
+                                <property name="label">Add Column</property>
+                            </object>
+                        </child>
+
+                        <child>
+                            <object class="GtkButton" id="add_row_button">
+                                <property name="label">Add Row</property>
+                            </object>
+                        </child>
+                        
+                        <child>
+                            <object class="GtkButton" id="remove_column_button">
+                                <property name="label">Remove Column</property>
+                            </object>
+                        </child>
+                        
+                        <child>
+                            <object class="GtkButton" id="remove_row_button">
+                                <property name="label">Remove </property>
+                            </object>
+                        </child>
+                        
+                        <child>
+                            <object class="GtkScrolledWindow" id="scroll-window">
                                 <property name="vexpand">true</property>
                                 <property name="width-request">200</property>
+                                <child>
+                                    <object class="GtkBox" id="split_container">
+                                        <style><class name="split-container"></class></style>
+                                        <property name="orientation">vertical</property>
+                                        <property name="vexpand">true</property>
+                                        <property name="width-request">200</property>
+                                    </object>
+                                </child>
                             </object>
                         </child>
                     </object>

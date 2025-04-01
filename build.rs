@@ -7,8 +7,14 @@ fn main() {
         "src/widgets/video_player_widget/vplayer.gresource.xml", 
         "vplayer.gresource");
 
-    glib_build_tools::compile_resources(&["src/widgets/main_window"], 
+    glib_build_tools::compile_resources(
+        &["src/widgets/main_window"], 
         "src/widgets/main_window/mwindow.gresource.xml",
         "mwindow.gresource");
+
+    glib_build_tools::compile_resources(
+        &["src/widgets/split_panel"],
+        "src/widgets/split_panel/spanel.gresource.xml", 
+        "spanel.gresource");
     
 }

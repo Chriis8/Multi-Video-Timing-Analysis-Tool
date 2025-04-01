@@ -14,7 +14,6 @@ use std::cell::{Cell, RefCell};
 mod imp {
 
     use gtk::{Box, Button, Label, Picture, Scale};
-    use crate::widgets::video_player_widget::video_player;
 
     use super::*;
     
@@ -73,7 +72,7 @@ mod imp {
     #[gtk::glib::object_subclass]
     impl ObjectSubclass for VideoPlayer {
         const NAME: &'static str = "VideoPlayer";
-        type Type = video_player::VideoPlayer;
+        type Type = super::VideoPlayer;
         type ParentType = gtk::Box;
         
         fn class_init(klass: &mut Self::Class) {

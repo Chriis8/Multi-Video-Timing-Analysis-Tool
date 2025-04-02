@@ -1,12 +1,18 @@
 mod video_pipeline;
 use gio::ListStore;
-use glib::{random_int_range, uuid_string_random};
-use gtk::ColumnViewColumn;
-use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button, ColumnView, CssProvider, Label, StringObject};
+use glib::property::PropertyGet;
+use glib::random_int_range;
+use gtk::{ColumnViewColumn, ListItem};
+use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button, ColumnView, CssProvider, Label, StringObject, Entry};
 use gstgtk4;
+use std::{rc::Rc, cell::RefCell};
 mod widgets;
 use widgets::video_player_widget::video_player::VideoPlayer;
 use widgets::split_panel::splits::VideoSegment;
+
+struct Videos {
+    video_players: std::cell::RefCell<Vec<VideoSegment>>,
+}
 
 fn load_css(path: &str) {
     let provider = CssProvider::new();
@@ -24,7 +30,7 @@ fn load_css(path: &str) {
     }
 }
 
-fn build_ui(app: &Application) -> Builder {
+fn build_ui(app: &Application, videos: Rc<Videos>) -> Builder {
     let builder = Builder::from_resource("/mainwindow/mwindow.ui");
     let column_builder = Builder::from_resource("/spanel/spanel.ui");
 
@@ -42,16 +48,26 @@ fn build_ui(app: &Application) -> Builder {
     let (model, column_view) = create_column_view();
 
     column_view_container.append(&column_view);
-
+    let column_view_clone = column_view.clone();
+    add_name_column(&column_view_clone, "Segment Name");
     let column_view_clone = column_view.clone();
     add_column_button.connect_clicked(move |_| {
-        let name = random_int_range(0, 100);
-        add_column(&column_view_clone, name.to_string().as_str(), |seg| seg.get_name());
+        let name = random_int_range(0, 99);
+        add_column(&column_view_clone, name.to_string().as_str(), |seg| seg.get_time().to_string());
+        add_column(&column_view_clone, name.to_string().as_str(), |seg| seg.get_duration().to_string());
     });
 
     let model_clone = model.clone();
+    let videos_clone = videos.clone();
     add_row_button.connect_clicked(move |_| {
-        add_row(&model_clone, "Segment", 1000, 5000);
+        // let name = random_int_range(100, 999).to_string();
+        // let time = random_int_range(1000, 9999) as u64;
+        // let duration = random_int_range(10000, 99999) as u64;
+        let row_count = model_clone.n_items() as usize;
+        let name = videos_clone.video_players.borrow()[row_count].get_name();
+        let time = videos_clone.video_players.borrow()[row_count].get_time();
+        let duration = videos_clone.video_players.borrow()[row_count].get_duration();
+        add_row(&model_clone, name.as_str(), time, duration);
     });
 
     let column_view_clone = column_view.clone();
@@ -62,6 +78,28 @@ fn build_ui(app: &Application) -> Builder {
     let model_clone = model.clone();
     remove_row_button.connect_clicked(move |_| {
         remove_row(&model_clone);
+    });
+
+    let button: Button = builder.object("new_video_player_button").expect("Failed to get button");
+    let builder_clone = builder.clone();
+    let column_view_clone = column_view.clone();
+    let videos_clone = videos.clone();
+    button.connect_clicked(move |_| {
+        let video_container: Box = builder_clone.object("video_container").expect("failed to get video_container from UI file");
+        let window: ApplicationWindow = builder_clone.object("main_window").expect("Failed to get main_window from UI file");
+        let new_player = VideoPlayer::new();
+        new_player.setup_event_handlers(window);
+        video_container.append(&new_player);
+
+        let name = random_int_range(100, 999).to_string();
+        let time = random_int_range(1000, 9999) as u64;
+        let duration = random_int_range(10000, 99999) as u64;
+
+        videos_clone.video_players.borrow_mut().push(VideoSegment::new(name.as_str(), time, duration));
+
+        let name = random_int_range(0, 99);
+        add_column(&column_view_clone, name.to_string().as_str(), |seg| seg.get_time().to_string());
+        add_column(&column_view_clone, name.to_string().as_str(), |seg| seg.get_duration().to_string());
     });
 
     app.add_window(&window);
@@ -89,8 +127,11 @@ fn main() -> glib::ExitCode {
     
     let app = gtk::Application::new(None::<&str>, gtk::gio::ApplicationFlags::FLAGS_NONE);
     app.connect_activate(|app| {
-        let builder = build_ui(app);
-        set_up_button(builder);
+        
+        let videos: Rc<Videos> = Rc::new(Videos {
+            video_players: RefCell::new(Vec::new()),
+        });
+        let builder = build_ui(app, videos);
 
         // let window = ApplicationWindow::new(app);
 
@@ -137,18 +178,6 @@ fn create_factory() -> gtk::SignalListItemFactory{
     factory
 }
 
-fn set_up_button(builder: Builder) {
-    let button: Button = builder.object("new_video_player_button").expect("Failed to get button");
-    
-    button.connect_clicked(move |_| {
-        let video_container: Box = builder.object("video_container").expect("failed to get video_container from UI file");
-        let window: ApplicationWindow = builder.object("main_window").expect("Failed to get main_window from UI file");
-        let new_player = VideoPlayer::new();
-        new_player.setup_event_handlers(window);
-        video_container.append(&new_player);
-    });
-}
-
 fn create_column_view() -> (ListStore, ColumnView) {
     // Create a ListStore to hold VideoSegment data
     let model = gio::ListStore::new::<VideoSegment>();
@@ -180,6 +209,36 @@ fn add_column(column_view: &gtk::ColumnView, title: &str, field_accessor: fn(&Vi
 
     let column = gtk::ColumnViewColumn::new(Some(title), Some(factory));
     column_view.append_column(&column);
+}
+
+fn add_name_column(column_view: &gtk::ColumnView, title: &str) {
+    let factory = gtk::SignalListItemFactory::new();
+
+    factory.connect_setup(|_factory, list_item: &ListItem| {
+        let entry = Entry::new();
+
+        list_item.set_child(Some(&entry));
+    });
+
+    factory.connect_bind(|_factory, list_item: &ListItem| {
+        let entry = list_item.child().unwrap().downcast::<Entry>().expect("The child is not an Entry");
+        let item = list_item.item();
+        let video_segment = item.and_downcast_ref::<VideoSegment>().expect("Item is not a VideoSegment");
+        let current_name = video_segment.get_name();
+        entry.set_text(&current_name);
+
+        entry.connect_changed(glib::clone!(
+            #[weak(rename_to = seg)] video_segment,
+            move |entry| {
+                let new_name = entry.text().to_string();
+                seg.set_name(new_name);
+            } 
+        ));
+    });
+
+    let new_column = gtk::ColumnViewColumn::new(Some(title), Some(factory));
+    column_view.append_column(&new_column);
+
 }
 
 fn remove_column(column_view: &gtk::ColumnView) {

@@ -1,6 +1,7 @@
 
 use gtk::glib;
 use gtk::subclass::prelude::*;
+use imp::Segment;
 use std::cell::RefCell;
 
 mod imp {
@@ -8,11 +9,18 @@ mod imp {
 
     use super::*;
     
+
+    pub struct Segment {
+        pub time: u64,
+        pub duration: u64,
+    }
+
     #[derive(Default)]
     pub struct VideoSegment {
         pub name: RefCell<String>,
         pub time: RefCell<u64>,
         pub duration: RefCell<u64>,
+        pub segments: RefCell<Vec<Segment>>,
     }
     
     #[gtk::glib::object_subclass]
@@ -38,7 +46,7 @@ impl VideoSegment {
         *imp.name.borrow_mut() = name.to_string();
         *imp.time.borrow_mut() = time;
         *imp.duration.borrow_mut() = duration;
-
+        
         segment
     }
 
@@ -55,5 +63,10 @@ impl VideoSegment {
     pub fn get_duration(&self) -> u64 {
         let imp = imp::VideoSegment::from_obj(self);
         *imp.duration.borrow()
+    }
+
+    pub fn set_name(&self, new_name: String) {
+        let imp = imp::VideoSegment::from_obj(self);
+        *imp.name.borrow_mut() = new_name;
     }
 }

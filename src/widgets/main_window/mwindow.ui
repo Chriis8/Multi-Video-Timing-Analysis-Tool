@@ -55,6 +55,7 @@
                             <object class="GtkScrolledWindow" id="scroll-window">
                                 <property name="vexpand">true</property>
                                 <property name="width-request">200</property>
+                                <property name="hexpand">true</property>
                                 <child>
                                     <object class="GtkBox" id="split_container">
                                         <style><class name="split-container"></class></style>

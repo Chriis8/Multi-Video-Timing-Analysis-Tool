@@ -1,6 +1,5 @@
 mod video_pipeline;
 use gio::ListStore;
-use glib::property::PropertyGet;
 use glib::random_int_range;
 use gtk::{ColumnViewColumn, ListItem};
 use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button, ColumnView, CssProvider, Label, StringObject, Entry};
@@ -11,7 +10,7 @@ use widgets::video_player_widget::video_player::VideoPlayer;
 use widgets::split_panel::splits::VideoSegment;
 
 struct Videos {
-    video_players: std::cell::RefCell<Vec<VideoSegment>>,
+    video_players: std::cell::RefCell<Vec<Vec<VideoSegment>>>,
 }
 
 fn load_css(path: &str) {
@@ -60,14 +59,11 @@ fn build_ui(app: &Application, videos: Rc<Videos>) -> Builder {
     let model_clone = model.clone();
     let videos_clone = videos.clone();
     add_row_button.connect_clicked(move |_| {
-        // let name = random_int_range(100, 999).to_string();
-        // let time = random_int_range(1000, 9999) as u64;
-        // let duration = random_int_range(10000, 99999) as u64;
         let row_count = model_clone.n_items() as usize;
-        let name = videos_clone.video_players.borrow()[row_count].get_name();
-        let time = videos_clone.video_players.borrow()[row_count].get_time();
-        let duration = videos_clone.video_players.borrow()[row_count].get_duration();
-        add_row(&model_clone, name.as_str(), time, duration);
+        // let name = videos_clone.video_players.borrow()[row_count].get_name();
+        // let time = videos_clone.video_players.borrow()[row_count].get_time();
+        // let duration = videos_clone.video_players.borrow()[row_count].get_duration();
+        // add_row(&model_clone, name.as_str(), time, duration);
     });
 
     let column_view_clone = column_view.clone();
@@ -91,20 +87,64 @@ fn build_ui(app: &Application, videos: Rc<Videos>) -> Builder {
         new_player.setup_event_handlers(window);
         video_container.append(&new_player);
 
-        let name = random_int_range(100, 999).to_string();
-        let time = random_int_range(1000, 9999) as u64;
-        let duration = random_int_range(10000, 99999) as u64;
-
-        videos_clone.video_players.borrow_mut().push(VideoSegment::new(name.as_str(), time, duration));
+        new_row(&videos_clone);
 
         let name = random_int_range(0, 99);
         add_column(&column_view_clone, name.to_string().as_str(), |seg| seg.get_time().to_string());
         add_column(&column_view_clone, name.to_string().as_str(), |seg| seg.get_duration().to_string());
     });
 
+    let button: Button = builder.object("new_split").expect("Failed to get new split button");
+    let videos_clone = videos.clone();
+    button.connect_clicked(move |_| {
+        for row in &mut *videos_clone.video_players.borrow_mut() {
+            let name = random_int_range(100, 999).to_string();
+            let time = random_int_range(1000, 9999) as u64;
+            let duration = random_int_range(10000, 99999) as u64;
+            row.push(VideoSegment::new(name.as_str(), time, duration));
+        }
+    });
+
+    let button: Button = builder.object("print_splits_button").expect("Failed to get new split button");
+    let videos_clone = videos.clone();
+    button.connect_clicked(move |_| {
+        print_vec(&videos_clone);
+    });
+
     app.add_window(&window);
     window.show();
     builder
+}
+
+fn print_vec(v: &Videos) {
+    println!("Splits");
+    for row in &*v.video_players.borrow() {
+        for segment in row {
+            let name = segment.get_name();
+            print!("{name} | ");
+        }
+        println!("");
+    }
+}
+
+fn new_row(v: &Videos) {
+    if v.video_players.borrow().len() == 0 {
+        let new_row: Vec<VideoSegment> = Vec::new();
+        v.video_players.borrow_mut().push(new_row);
+        return;
+    }
+
+    let length = v.video_players.borrow()[0].len();
+    let mut new_row: Vec<VideoSegment> = Vec::new();
+    
+    for _ in 0..length {
+        let name = random_int_range(100, 999).to_string();
+        let time = random_int_range(1000, 9999) as u64;
+        let duration = random_int_range(10000, 99999) as u64;
+        new_row.push(VideoSegment::new(name.as_str(), time, duration));
+    }
+
+    v.video_players.borrow_mut().push(new_row);
 }
 
 

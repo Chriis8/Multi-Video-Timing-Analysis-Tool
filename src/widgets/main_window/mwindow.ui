@@ -24,9 +24,9 @@
                             <object class="GtkButton" id="new_video_player_button">
                                 <style><class name="new-video-player-button"></class></style>
                                 <property name="vexpand">true</property>
+                                <property name="label">New Player</property>
                             </object>
                         </child>
-
                         <child>
                             <object class="GtkButton" id="add_column_button">
                                 <property name="label">Add Column</property>
@@ -73,6 +73,17 @@
                         <style><class name="bottom-container"></class></style>
                         <property name="hexpand">true</property>
                         <property name="height-request">100</property>
+
+                        <child>
+                            <object class="GtkButton" id="new_split">
+                                <property name="label">new split</property>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkButton" id="print_splits_button">
+                                <property name="label">print splits</property>
+                            </object>
+                        </child>
                     </object>
                 </child>
             </object>

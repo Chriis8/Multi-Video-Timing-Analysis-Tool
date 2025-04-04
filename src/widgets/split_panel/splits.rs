@@ -5,11 +5,8 @@ use imp::Segment;
 use std::cell::RefCell;
 
 mod imp {
-
-
     use super::*;
     
-
     pub struct Segment {
         pub time: u64,
         pub duration: u64,
@@ -18,8 +15,6 @@ mod imp {
     #[derive(Default)]
     pub struct VideoSegment {
         pub name: RefCell<String>,
-        pub time: RefCell<u64>,
-        pub duration: RefCell<u64>,
         pub segments: RefCell<Vec<Segment>>,
     }
     
@@ -28,9 +23,8 @@ mod imp {
         const NAME: &'static str = "VideoSegment";
         type Type = super::VideoSegment;
     }
-    
+
     impl ObjectImpl for VideoSegment {}
-    
 }
 
 glib::wrapper! {
@@ -39,14 +33,10 @@ glib::wrapper! {
 }
 
 impl VideoSegment {
-    pub fn new(name: &str, time: u64, duration: u64) -> Self {
+    pub fn new(name: &str) -> Self {
         let segment: Self = glib::Object::new::<Self>();
         let imp = imp::VideoSegment::from_obj(&segment);
-
         *imp.name.borrow_mut() = name.to_string();
-        *imp.time.borrow_mut() = time;
-        *imp.duration.borrow_mut() = duration;
-        
         segment
     }
 
@@ -55,18 +45,37 @@ impl VideoSegment {
         imp.name.borrow().clone()
     }
     
-    pub fn get_time(&self) -> u64 {
+    pub fn get_time(&self, video_number: usize) -> u64 {
         let imp = imp::VideoSegment::from_obj(self);
-        *imp.time.borrow()
+        imp.segments.borrow()[video_number].time
     }
 
-    pub fn get_duration(&self) -> u64 {
+    pub fn get_duration(&self, video_number: usize) -> u64 {
         let imp = imp::VideoSegment::from_obj(self);
-        *imp.duration.borrow()
+        imp.segments.borrow()[video_number].duration
+    }
+
+    pub fn count(&self) -> usize {
+        let imp = imp::VideoSegment::from_obj(self);
+        imp.segments.borrow().len()
+    }
+
+    pub fn get_segments(&self, index: usize) -> (u64, u64) {
+        let imp = imp::VideoSegment::from_obj(self);
+        (imp.segments.borrow()[index].time, imp.segments.borrow()[index].duration)
     }
 
     pub fn set_name(&self, new_name: String) {
         let imp = imp::VideoSegment::from_obj(self);
-        *imp.name.borrow_mut() = new_name;
+        imp.name.replace(new_name);
+    }
+
+    pub fn add_segment(&self, time: u64, duration: u64) {
+        let imp = imp::VideoSegment::from_obj(self);
+        let new_segment = Segment {
+            time: time,
+            duration: duration,
+        };
+        imp.segments.borrow_mut().push(new_segment);
     }
 }

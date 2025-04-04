@@ -73,7 +73,6 @@
                         <style><class name="bottom-container"></class></style>
                         <property name="hexpand">true</property>
                         <property name="height-request">100</property>
-
                         <child>
                             <object class="GtkButton" id="new_split">
                                 <property name="label">new split</property>

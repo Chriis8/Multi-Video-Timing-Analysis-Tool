@@ -78,4 +78,11 @@ impl VideoSegment {
         };
         imp.segments.borrow_mut().push(new_segment);
     }
+
+    pub fn set_segment(&self, index: usize, time: u64, duration: u64) {
+        let imp = imp::VideoSegment::from_obj(self);
+        let seg = &mut imp.segments.borrow_mut()[index];
+        seg.time = time;
+        seg.duration = duration;
+    }
 }

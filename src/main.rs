@@ -4,18 +4,9 @@ use glib::random_int_range;
 use gtk::{ColumnViewColumn, ListItem};
 use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button, ColumnView, CssProvider, Label, StringObject, Entry};
 use gstgtk4;
-use std::{rc::Rc, cell::RefCell};
 mod widgets;
 use widgets::video_player_widget::video_player::VideoPlayer;
 use widgets::split_panel::splits::VideoSegment;
-
-
-//Change the videosegment to have vec of information instead
-//each item in the liststore should be a different split
-//each item in the videosegment vecs should be the same split but for each different video
-// struct Videos {
-//     video_players: std::cell::RefCell<Vec<Vec<VideoSegment>>>,
-// }
 
 fn load_css(path: &str) {
     let provider = CssProvider::new();
@@ -41,6 +32,7 @@ fn build_ui(app: &Application) -> Builder {
     load_css("src\\widgets\\split_panel\\style.css");
 
     let window: ApplicationWindow = builder.object("main_window").expect("Failed to get main_window from UI file");
+    let test_buttons: Vec<Button> = Vec::new();
     //let column_view: ColumnView = column_builder.object("column_view").expect("Failed to get column_view from UI File");
     let column_view_container: Box = builder.object("split_container").expect("Failed to column_view_container from UI File");
     let add_column_button: Button = builder.object("add_column_button").expect("Failed to get add_column_button from UI File");
@@ -81,7 +73,7 @@ fn build_ui(app: &Application) -> Builder {
         let name = row_count;
         let seg = VideoSegment::new(name.to_string().as_str());
         
-        for x in 0..column_count {
+        for _ in 0..column_count {
             let time = random_int_range(row_count as i32 * 100, (row_count as i32 + 1) * 100);
             let duration = random_int_range(row_count as i32 * 100, (row_count as i32 + 1) * 100);
             seg.add_segment(time as u64, duration as u64);
@@ -103,6 +95,7 @@ fn build_ui(app: &Application) -> Builder {
     let button: Button = builder.object("new_video_player_button").expect("Failed to get button");
     let builder_clone = builder.clone();
     let column_view_clone = column_view.clone();
+    let model_clone = model.clone();
     button.connect_clicked(move |_| {
         let video_container: Box = builder_clone.object("video_container").expect("failed to get video_container from UI file");
         let window: ApplicationWindow = builder_clone.object("main_window").expect("Failed to get main_window from UI file");
@@ -110,22 +103,38 @@ fn build_ui(app: &Application) -> Builder {
         new_player.setup_event_handlers(window);
         video_container.append(&new_player);
 
-        //new_row(&videos_clone);
-
         let name = random_int_range(0, 99);
         let column_count = column_view_clone.columns().n_items() - 1;
         add_column(&column_view_clone, name.to_string().as_str(), column_count as usize);
+        
+        let new_test_button = new_player.test_button();
+        let model_clone = model_clone.clone();
+        new_test_button.connect_clicked(move |_| {
+            println!("clicked test button {column_count}");
+            let gstman_weak = new_player.pipeline();
+            if let Some(gstman) = gstman_weak.upgrade() {
+                if let Ok(mut guard) = gstman.lock() {
+                    if let Some(ref mut pipeline) = *guard {
+                        let row_count = model_clone.n_items() - 1;
+                        println!("{row_count}");
+                        let segment = model_clone.item(row_count).and_downcast::<VideoSegment>().unwrap();
+                        let current_time = pipeline.get_position().unwrap();
+                        let nanos = current_time.nseconds();
+                        segment.set_segment(column_count as usize, nanos, nanos);
+                        model_clone.remove(row_count);
+                        model_clone.insert(row_count, &segment);
+                        //model_clone.items_changed(row_count, 1, 1);
+                    } else {
+                        eprintln!("No Video Pipeline available");
+                    }
+                } else {
+                    eprintln!("Failed to aquire lock on Video pipeline");
+                }
+            } else {
+                eprintln!("OAOSOFASD");
+            }
+        });
     });
-
-    // let button: Button = builder.object("new_split").expect("Failed to get new split button");
-    // button.connect_clicked(move |_| {
-    //     for row in &mut *videos_clone.video_players.borrow_mut() {
-    //         let name = random_int_range(100, 999).to_string();
-    //         let time = random_int_range(1000, 9999) as u64;
-    //         let duration = random_int_range(10000, 99999) as u64;
-    //         //row.push(VideoSegment::new(name.as_str(), time, duration));
-    //     }
-    // });
 
     let button: Button = builder.object("print_splits_button").expect("Failed to get new split button");
     let model_clone = model.clone();
@@ -152,26 +161,6 @@ fn print_vec(model: &ListStore) {
         println!("");
     }
 }
-
-// fn new_row(v: &Videos) {
-//     if v.video_players.borrow().len() == 0 {
-//         let new_row: Vec<VideoSegment> = Vec::new();
-//         v.video_players.borrow_mut().push(new_row);
-//         return;
-//     }
-
-//     let length = v.video_players.borrow()[0].len();
-//     let mut new_row: Vec<VideoSegment> = Vec::new();
-    
-//     for _ in 0..length {
-//         let name = random_int_range(100, 999).to_string();
-//         let time = random_int_range(1000, 9999) as u64;
-//         let duration = random_int_range(10000, 99999) as u64;
-//         new_row.push(VideoSegment::new(name.as_str(), time, duration));
-//     }
-
-//     v.video_players.borrow_mut().push(new_row);
-// }
 
 fn create_column_view() -> (ListStore, ColumnView) {
     // Create a ListStore to hold VideoSegment data
@@ -255,6 +244,7 @@ fn remove_row(model: &gio::ListStore) {
         model.remove(model.n_items() - 1);
     }
 }
+
 fn main() -> glib::ExitCode {
     gstreamer::init().unwrap();
     gtk::init().unwrap();
@@ -289,12 +279,25 @@ fn main() -> glib::ExitCode {
         // window.set_child(Some(&main_box));
 
         // window.show();
-
+        let builder_clone = builder.clone();
+        app.connect_shutdown(move |_| {
+            println!("shutting down");
+            let video_container: Box = builder_clone.object("video_container").expect("failed to get video_container from UI file");
+            
+            while let Some(child) = video_container.last_child() {
+                let video = child.downcast::<VideoPlayer>().unwrap();
+                unsafe {
+                    video.unparent(); 
+                    video.run_dispose();
+                }
+            }
+        });
 
         // app.add_window(&window);
         // window.show();
 
     });
+
 
     let res = app.run();
 

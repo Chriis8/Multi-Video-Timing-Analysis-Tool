@@ -10,10 +10,11 @@ use std::time::Duration;
 use crate::video_pipeline::VideoPipeline;
 use std::rc::Rc;
 use std::cell::{Cell, RefCell};
+use once_cell::sync::Lazy;
 
 mod imp {
-
     use gtk::{Box, Button, Label, Picture, Scale};
+    use glib::subclass::Signal;
 
     use super::*;
     
@@ -27,6 +28,8 @@ mod imp {
         pub continue_timeout: RefCell<bool>,
         
         pub is_dragging: Rc<Cell<bool>>,
+        
+        pub id: Cell<u32>,
         
         #[template_child]
         pub vbox: TemplateChild<Box>,
@@ -67,6 +70,9 @@ mod imp {
         #[template_child]
         pub next_frame_button: TemplateChild<Button>,
         
+        #[template_child]
+        pub split_button: TemplateChild<Button>,
+
         #[template_child]
         pub test_button: TemplateChild<Button>,
     }
@@ -113,6 +119,17 @@ mod imp {
         fn constructed(&self) {
             self.setup_seek_bar();
         }
+
+        fn signals() -> &'static [Signal] {
+            static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
+                vec![Signal::builder("button-clicked")
+                    .flags(glib::SignalFlags::RUN_LAST)
+                    .param_types([u32::static_type(), u64::static_type()])
+                    .build()
+                    ]
+                });
+            SIGNALS.as_ref()
+        }
     }
     impl WidgetImpl for VideoPlayer {}
     impl BoxImpl for VideoPlayer {}
@@ -125,7 +142,7 @@ glib::wrapper! {
 }
 
 impl VideoPlayer {
-    pub fn new() -> Self {
+    pub fn new(id: u32) -> Self {
         let widget: Self = glib::Object::new::<Self>();
         
         let imp = imp::VideoPlayer::from_obj(&widget);
@@ -135,6 +152,7 @@ impl VideoPlayer {
         }
 
         *imp.continue_timeout.borrow_mut() = false;
+        imp.id.set(id);
 
         println!("created video player widget");
         widget
@@ -149,12 +167,10 @@ impl VideoPlayer {
         *imp.continue_timeout.borrow_mut() = true;
         let to_continue = imp.continue_timeout.clone();
         let source_id = timeout_add_local(Duration::from_millis(500), move || {
-            println!("timeout running");
             if !*to_continue.borrow() {
                 println!("breaking update scale timeout");
                 return glib::ControlFlow::Break
             }
-            println!("Continue set to true");
             if is_dragging_clone.get() {
                 println!("Dragging, skipping update scale");
                 return glib::ControlFlow::Continue
@@ -379,15 +395,28 @@ impl VideoPlayer {
             }
         ));
         
-        // let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
-        // imp.test_button.connect_clicked(glib::clone!(
-        //     #[strong] gstman_weak,
-        //     #[weak(rename_to = scale)] imp.seek_bar,
-        //     #[weak(rename_to = this)] self,
-        //     move |_| {
-        //         this.start_updating_scale(&scale);
-        //     }
-        // ));
+        let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        imp.test_button.connect_clicked(glib::clone!(
+            #[weak(rename_to = this)] self,
+            #[strong] gstman_weak,
+            #[weak] imp,
+            move |_| {
+                let gstman = match gstman_weak.upgrade() {
+                    Some(val) => val, None => return,
+                };
+                let guard = match gstman.lock() {
+                    Ok(val) => val, Err(_) => return,
+                };
+                let ref mut pipeline = match &*guard {
+                    Some(val) => val, None => return,
+                };
+                
+                let pos = pipeline.get_position().unwrap();
+                let nanos: &dyn ToValue = &pos.nseconds();
+                let id: &dyn ToValue = &imp.id.get();
+                this.emit_by_name::<()>("button_clicked", &[id, nanos]);
+            }
+        ));
 
         //let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
         //Self::connect_scale_signals(&imp.seek_bar, gstman_weak);
@@ -395,9 +424,9 @@ impl VideoPlayer {
         Self::load_css();
     }
 
-    pub fn test_button(&self) -> gtk::Button {
+    pub fn split_button(&self) -> gtk::Button {
         let imp = imp::VideoPlayer::from_obj(self);
-        imp.test_button.clone()
+        imp.split_button.clone()
     }
 
     pub fn pipeline(&self) -> Weak<Mutex<Option<VideoPipeline>>> {

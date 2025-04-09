@@ -32,7 +32,6 @@ fn build_ui(app: &Application) -> Builder {
     load_css("src\\widgets\\split_panel\\style.css");
 
     let window: ApplicationWindow = builder.object("main_window").expect("Failed to get main_window from UI file");
-    let test_buttons: Vec<Button> = Vec::new();
     //let column_view: ColumnView = column_builder.object("column_view").expect("Failed to get column_view from UI File");
     let column_view_container: Box = builder.object("split_container").expect("Failed to column_view_container from UI File");
     let add_column_button: Button = builder.object("add_column_button").expect("Failed to get add_column_button from UI File");
@@ -98,42 +97,55 @@ fn build_ui(app: &Application) -> Builder {
     let model_clone = model.clone();
     button.connect_clicked(move |_| {
         let video_container: Box = builder_clone.object("video_container").expect("failed to get video_container from UI file");
+        let column_count = column_view_clone.columns().n_items() - 1;
         let window: ApplicationWindow = builder_clone.object("main_window").expect("Failed to get main_window from UI file");
-        let new_player = VideoPlayer::new();
+        let new_player = VideoPlayer::new(column_count);
         new_player.setup_event_handlers(window);
+        
+        let model_clone = model_clone.clone();
+        new_player.connect_local("button-clicked", false, move |args| {
+            let id: u32 = args[1].get().unwrap();
+            let position: u64 = args[2].get().unwrap();
+            println!("Main Scope: button clicked ----- {id} | {position}");
+            let row_count = model_clone.n_items() - 1;
+            let segment = model_clone.item(row_count).and_downcast::<VideoSegment>().unwrap();
+            segment.set_segment(id as usize, position, position);
+            model_clone.remove(row_count);
+            model_clone.insert(row_count, &segment);
+            None
+        });
         video_container.append(&new_player);
 
         let name = random_int_range(0, 99);
-        let column_count = column_view_clone.columns().n_items() - 1;
         add_column(&column_view_clone, name.to_string().as_str(), column_count as usize);
         
-        let new_test_button = new_player.test_button();
-        let model_clone = model_clone.clone();
-        new_test_button.connect_clicked(move |_| {
-            println!("clicked test button {column_count}");
-            let gstman_weak = new_player.pipeline();
-            if let Some(gstman) = gstman_weak.upgrade() {
-                if let Ok(mut guard) = gstman.lock() {
-                    if let Some(ref mut pipeline) = *guard {
-                        let row_count = model_clone.n_items() - 1;
-                        println!("{row_count}");
-                        let segment = model_clone.item(row_count).and_downcast::<VideoSegment>().unwrap();
-                        let current_time = pipeline.get_position().unwrap();
-                        let nanos = current_time.nseconds();
-                        segment.set_segment(column_count as usize, nanos, nanos);
-                        model_clone.remove(row_count);
-                        model_clone.insert(row_count, &segment);
-                        //model_clone.items_changed(row_count, 1, 1);
-                    } else {
-                        eprintln!("No Video Pipeline available");
-                    }
-                } else {
-                    eprintln!("Failed to aquire lock on Video pipeline");
-                }
-            } else {
-                eprintln!("OAOSOFASD");
-            }
-        });
+        // let new_split_button = new_player.split_button();
+        // let model_clone = model_clone.clone();
+        // new_split_button.connect_clicked(move |_| {
+        //     println!("clicked split button {column_count}");
+        //     let gstman_weak = new_player.pipeline();
+        //     if let Some(gstman) = gstman_weak.upgrade() {
+        //         if let Ok(mut guard) = gstman.lock() {
+        //             if let Some(ref mut pipeline) = *guard {
+        //                 let row_count = model_clone.n_items() - 1;
+        //                 println!("{row_count}");
+        //                 let segment = model_clone.item(row_count).and_downcast::<VideoSegment>().unwrap();
+        //                 let current_time = pipeline.get_position().unwrap();
+        //                 let nanos = current_time.nseconds();
+        //                 segment.set_segment(column_count as usize, nanos, nanos);
+        //                 model_clone.remove(row_count);
+        //                 model_clone.insert(row_count, &segment);
+        //                 //model_clone.items_changed(row_count, 1, 1);
+        //             } else {
+        //                 eprintln!("No Video Pipeline available");
+        //             }
+        //         } else {
+        //             eprintln!("Failed to aquire lock on Video pipeline");
+        //         }
+        //     } else {
+        //         eprintln!("OAOSOFASD");
+        //     }
+        // });
     });
 
     let button: Button = builder.object("print_splits_button").expect("Failed to get new split button");
@@ -141,6 +153,8 @@ fn build_ui(app: &Application) -> Builder {
     button.connect_clicked(move |_| {
         print_vec(&model_clone);
     });
+
+
 
     app.add_window(&window);
     window.show();
@@ -183,6 +197,7 @@ fn add_column(column_view: &gtk::ColumnView, title: &str, index: usize) {
     });
     
     factory.connect_bind(move |_, list_item| {
+        //Broken if you add new video player after already creating some rows
         let label = list_item.child().unwrap().downcast::<gtk::Label>().unwrap();
         if let Some(item) = list_item.item().and_downcast::<VideoSegment>() {
             let data1 = &item.get_time(index);

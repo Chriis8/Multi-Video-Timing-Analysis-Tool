@@ -27,11 +27,11 @@
                                 <property name="label">New Player</property>
                             </object>
                         </child>
-                        <child>
+                        <!-- <child>
                             <object class="GtkButton" id="add_column_button">
                                 <property name="label">Add Column</property>
                             </object>
-                        </child>
+                        </child> -->
 
                         <child>
                             <object class="GtkButton" id="add_row_button">

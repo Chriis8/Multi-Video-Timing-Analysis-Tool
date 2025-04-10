@@ -7,6 +7,7 @@ use std::cell::RefCell;
 mod imp {
     use super::*;
     
+    #[derive(Clone)]
     pub struct Segment {
         pub time: u64,
         pub duration: u64,
@@ -45,14 +46,9 @@ impl VideoSegment {
         imp.name.borrow().clone()
     }
     
-    pub fn get_time(&self, video_number: usize) -> u64 {
+    pub fn get_segment(&self, video_number: usize) -> Option<Segment> {
         let imp = imp::VideoSegment::from_obj(self);
-        imp.segments.borrow()[video_number].time
-    }
-
-    pub fn get_duration(&self, video_number: usize) -> u64 {
-        let imp = imp::VideoSegment::from_obj(self);
-        imp.segments.borrow()[video_number].duration
+        imp.segments.borrow().get(video_number).cloned()
     }
 
     pub fn count(&self) -> usize {

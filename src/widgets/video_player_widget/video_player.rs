@@ -414,6 +414,9 @@ impl VideoPlayer {
                 let pos = pipeline.get_position().unwrap();
                 let nanos: &dyn ToValue = &pos.nseconds();
                 let id: &dyn ToValue = &imp.id.get();
+                let n = pos.nseconds();
+                let i = imp.id.get();
+                println!("{i} {n}");
                 this.emit_by_name::<()>("button_clicked", &[id, nanos]);
             }
         ));

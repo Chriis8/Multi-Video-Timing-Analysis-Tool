@@ -9,8 +9,8 @@ mod imp {
     
     #[derive(Clone)]
     pub struct Segment {
-        pub time: u64,
-        pub duration: u64,
+        pub time: Option<u64>,
+        pub duration: Option<u64>,
     }
 
     #[derive(Default)]
@@ -56,7 +56,7 @@ impl VideoSegment {
         imp.segments.borrow().len()
     }
 
-    pub fn get_segments(&self, index: usize) -> (u64, u64) {
+    pub fn get_segments(&self, index: usize) -> (Option<u64>, Option<u64>) {
         let imp = imp::VideoSegment::from_obj(self);
         (imp.segments.borrow()[index].time, imp.segments.borrow()[index].duration)
     }
@@ -69,8 +69,17 @@ impl VideoSegment {
     pub fn add_segment(&self, time: u64, duration: u64) {
         let imp = imp::VideoSegment::from_obj(self);
         let new_segment = Segment {
-            time: time,
-            duration: duration,
+            time: Some(time),
+            duration: Some(duration),
+        };
+        imp.segments.borrow_mut().push(new_segment);
+    }
+
+    pub fn add_empty_segment(&self) {
+        let imp = imp::VideoSegment::from_obj(self);
+        let new_segment = Segment {
+            time: None,
+            duration: None,
         };
         imp.segments.borrow_mut().push(new_segment);
     }
@@ -78,7 +87,7 @@ impl VideoSegment {
     pub fn set_segment(&self, index: usize, time: u64, duration: u64) {
         let imp = imp::VideoSegment::from_obj(self);
         let seg = &mut imp.segments.borrow_mut()[index];
-        seg.time = time;
-        seg.duration = duration;
+        seg.time = Some(time);
+        seg.duration = Some(duration);
     }
 }

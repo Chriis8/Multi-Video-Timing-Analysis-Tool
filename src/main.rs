@@ -1,7 +1,8 @@
 mod video_pipeline;
 use gio::ListStore;
 use glib::random_int_range;
-use gtk::{ColumnViewColumn, ListItem};
+use gstreamer::ClockTime;
+use gtk::{ColumnViewColumn, ListItem, SingleSelection};
 use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button, ColumnView, CssProvider, Label, StringObject, Entry};
 use gstgtk4;
 mod widgets;
@@ -49,7 +50,7 @@ fn build_ui(app: &Application) -> Builder {
     let model_clone = model.clone();
     let column_view_clone = column_view.clone();
     add_row_button.connect_clicked(move |_| { //adds an item to liststore
-        add_row(&column_view_clone, &model_clone);
+        add_empty_row(&column_view_clone, &model_clone);
     });
 
     let column_view_clone = column_view.clone();
@@ -60,8 +61,13 @@ fn build_ui(app: &Application) -> Builder {
     let model_clone = model.clone();
     let column_view_clone = column_view.clone();
     remove_row_button.connect_clicked(move |_| {
-        let selected = column_view_clone.focus_child().downcast::<VideoSegment>();
-        remove_row(&model_clone);
+        if let Some(selection_model) = column_view_clone.model().and_downcast::<SingleSelection>() {
+            let selected_index = selection_model.selected();
+            println!("Removing Row {selected_index}");
+            remove_row(&model_clone, selected_index);
+        } else {
+            eprintln!("Couldnt get selection model");
+        }
     });
 
     let button: Button = builder.object("new_video_player_button").expect("Failed to get button");
@@ -76,17 +82,40 @@ fn build_ui(app: &Application) -> Builder {
         new_player.setup_event_handlers(window);
         
         let model_clone_clone = model_clone.clone();
+        let column_view_clone_clone = column_view_clone.clone();
         new_player.connect_local("button-clicked", false, move |args| {
             let id: u32 = args[1].get().unwrap();
             let position: u64 = args[2].get().unwrap();
             println!("Main Scope: button clicked ----- {id} | {position}");
-            let row_count = model_clone_clone.n_items() - 1;
+            let row_count = model_clone_clone.n_items();
             println!("row count: {row_count}");
+            
+            let mut update_row = row_count;
+            for i in 0..row_count {
+                let segment = model_clone_clone.item(i).and_downcast::<VideoSegment>().unwrap();
+                match segment.get_segment(id as usize) {
+                    Some(data) => {
+                        let time = data.time;
+                        let duration = data.duration;
+                        if let (Some(_t), Some(_d)) = (time, duration) {
+                            continue
+                        } else {
+                            update_row = i;
+                            break
+                        }
+                    }
+                    None => break
+                };
+            }
+            if update_row == row_count {
+                add_row(&column_view_clone_clone, &model_clone_clone, position, position);
+            } else {
+                let segment = model_clone_clone.item(update_row).and_downcast::<VideoSegment>().unwrap();
+                segment.set_segment(id as usize, position, position);
+                model_clone_clone.remove(update_row);
+                model_clone_clone.insert(update_row, &segment);
+            }
             print_vec(&model_clone_clone);
-            let segment = model_clone_clone.item(row_count).and_downcast::<VideoSegment>().unwrap();
-            segment.set_segment(id as usize, position, position);
-            model_clone_clone.remove(row_count);
-            model_clone_clone.insert(row_count, &segment);
             None
         });
         video_container.append(&new_player);
@@ -117,8 +146,8 @@ fn print_vec(model: &ListStore) {
             for j in 0..item.count() {
                 match item.get_segment(j) {
                     Some(data) => {
-                        let time = data.time;
-                        let duration = data.duration;
+                        let time = data.time.map_or(String::from("None"), |v| v.to_string());
+                        let duration = data.duration.map_or(String::from("None"), |v| v.to_string());
                         print!("{time}, {duration} |");
                     } 
                     None => print!("x |")
@@ -135,6 +164,8 @@ fn create_column_view() -> (ListStore, ColumnView) {
     let model_clone = model.clone();
     
     let selection_model = gtk::SingleSelection::new(Some(model_clone));
+    selection_model.set_autoselect(false);
+    selection_model.set_can_unselect(true);
     
     // Create the ColumnView
     let column_view = gtk::ColumnView::new(Some(selection_model));
@@ -163,10 +194,15 @@ fn add_column(column_view: &gtk::ColumnView, model: &ListStore, title: &str, ind
                 Some(data) => {
                     let time = data.time;
                     let duration = data.duration;
-                    let text = format!("{time} {duration}");
-                    label.set_text(text.as_str());
+                    if let (Some(t), Some(d)) = (time, duration) {
+                        let clock_time = ClockTime::from_nseconds(t);
+                        let clock_duration = ClockTime::from_nseconds(d);
+                        label.set_text(format!("{clock_time}, {clock_duration}").as_str())
+                    } else {
+                        label.set_text("None, None");
+                    }
                 } 
-                None => label.set_text(""),
+                None => label.set_text("Empty"),
             };
         }
     });
@@ -214,24 +250,41 @@ fn remove_column(column_view: &gtk::ColumnView) {
     }
 }
 
-fn add_row(column_view: &ColumnView, model: &ListStore) {
+fn add_empty_row(column_view: &ColumnView, model: &ListStore) {
     let column_count = column_view.columns().n_items() - 1;
     let row_count = model.n_items() as usize;
     let name = row_count;
     let seg = VideoSegment::new(name.to_string().as_str());
     
     for _ in 0..column_count {
-        let time = random_int_range(row_count as i32 * 100, (row_count as i32 + 1) * 100);
-        let duration = random_int_range(row_count as i32 * 100, (row_count as i32 + 1) * 100);
-        seg.add_segment(time as u64, duration as u64);
+        seg.add_empty_segment();
     }
     model.append(&seg);
 }
 
-fn remove_row(model: &gio::ListStore) {
-    if model.n_items() > 0 {
-        model.remove(model.n_items() - 1);
+fn add_row(column_view: &ColumnView, model: &ListStore, time: u64, duration: u64) {
+    let column_count = column_view.columns().n_items() - 1;
+    let row_count = model.n_items() as usize;
+    let name = row_count;
+    let seg = VideoSegment::new(name.to_string().as_str());
+    
+    for _ in 0..column_count {
+        seg.add_segment(time, duration);
     }
+    model.append(&seg);
+}
+
+fn remove_row(model: &gio::ListStore, row_index: u32) {
+    if model.n_items() == 0 {
+        eprintln!("No row to remove");
+        return;
+    }
+    if row_index >= model.n_items() {
+        eprintln!("No selected row");
+        return;
+    }
+    
+    model.remove(row_index);
 }
 
 fn main() -> glib::ExitCode {

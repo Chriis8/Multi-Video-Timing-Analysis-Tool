@@ -1,6 +1,6 @@
 mod video_pipeline;
 use gio::ListStore;
-use glib::random_int_range;
+use glib::{random_int_range, ExitCode};
 use gstreamer::ClockTime;
 use gtk::{ColumnViewColumn, ListItem, SingleSelection};
 use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button, ColumnView, CssProvider, Label, StringObject, Entry};
@@ -158,6 +158,20 @@ fn print_vec(model: &ListStore) {
     }
 }
 
+fn format_clock(time: ClockTime) -> String {
+    let mut ret = time.to_string();
+    let hours_offset = ret.find(":").unwrap();
+    let hour= ret[..hours_offset].to_string();
+    let hour_parsed: u32 = hour.parse().unwrap();
+    if hour_parsed == 0 {
+        ret.drain(..hours_offset+1);
+    }
+    let split = ret.find(".").unwrap();
+    let digits_after_decimal_point = 3;
+    ret.truncate(split + digits_after_decimal_point + 1);
+    ret
+}
+
 fn create_column_view() -> (ListStore, ColumnView) {
     // Create a ListStore to hold VideoSegment data
     let model = gio::ListStore::new::<VideoSegment>();
@@ -197,7 +211,9 @@ fn add_column(column_view: &gtk::ColumnView, model: &ListStore, title: &str, ind
                     if let (Some(t), Some(d)) = (time, duration) {
                         let clock_time = ClockTime::from_nseconds(t);
                         let clock_duration = ClockTime::from_nseconds(d);
-                        label.set_text(format!("{clock_time}, {clock_duration}").as_str())
+                        let formatted_time = format_clock(clock_time);
+                        let formatted_duration = format_clock(clock_duration);
+                        label.set_text(format!("{formatted_time}, {formatted_duration}").as_str())
                     } else {
                         label.set_text("None, None");
                     }
@@ -288,63 +304,70 @@ fn remove_row(model: &gio::ListStore, row_index: u32) {
 }
 
 fn main() -> glib::ExitCode {
-    gstreamer::init().unwrap();
-    gtk::init().unwrap();
+    let run_app = true;
+    if run_app {
+        gstreamer::init().unwrap();
+        gtk::init().unwrap();
 
-    std::env::set_var("GTK_THEME", "Adwaita:dark");
+        std::env::set_var("GTK_THEME", "Adwaita:dark");
 
-    gstgtk4::plugin_register_static().expect("Failed to register gstgtk4 plugin");
+        gstgtk4::plugin_register_static().expect("Failed to register gstgtk4 plugin");
 
-    gio::resources_register_include!("vplayer.gresource")
-        .expect("Failed to register resources.");
+        gio::resources_register_include!("vplayer.gresource")
+            .expect("Failed to register resources.");
 
-    gio::resources_register_include!("mwindow.gresource")
-        .expect("Failed to register resources.");
+        gio::resources_register_include!("mwindow.gresource")
+            .expect("Failed to register resources.");
 
-    gio::resources_register_include!("spanel.gresource")
-        .expect("Failed to register resources.");
-    
-    let app = gtk::Application::new(None::<&str>, gtk::gio::ApplicationFlags::FLAGS_NONE);
-    app.connect_activate(|app| {
+        gio::resources_register_include!("spanel.gresource")
+            .expect("Failed to register resources.");
         
-        let builder = build_ui(app);
-
-        // let window = ApplicationWindow::new(app);
-
-        // window.set_default_size(800, 600);
-        // window.set_title(Some("Video Player"));
-
-        // let main_box = Box::new(gtk::Orientation::Horizontal, 10);
-
-        
-
-        // window.set_child(Some(&main_box));
-
-        // window.show();
-        let builder_clone = builder.clone();
-        app.connect_shutdown(move |_| {
-            println!("shutting down");
-            let video_container: Box = builder_clone.object("video_container").expect("failed to get video_container from UI file");
+        let app = gtk::Application::new(None::<&str>, gtk::gio::ApplicationFlags::FLAGS_NONE);
+        app.connect_activate(|app| {
             
-            while let Some(child) = video_container.last_child() {
-                let video = child.downcast::<VideoPlayer>().unwrap();
-                unsafe {
-                    video.unparent(); 
-                    video.run_dispose();
+            let builder = build_ui(app);
+
+            // let window = ApplicationWindow::new(app);
+
+            // window.set_default_size(800, 600);
+            // window.set_title(Some("Video Player"));
+
+            // let main_box = Box::new(gtk::Orientation::Horizontal, 10);
+
+            
+
+            // window.set_child(Some(&main_box));
+
+            // window.show();
+            let builder_clone = builder.clone();
+            app.connect_shutdown(move |_| {
+                println!("shutting down");
+                let video_container: Box = builder_clone.object("video_container").expect("failed to get video_container from UI file");
+                
+                while let Some(child) = video_container.last_child() {
+                    let video = child.downcast::<VideoPlayer>().unwrap();
+                    unsafe {
+                        video.unparent(); 
+                        video.run_dispose();
+                    }
                 }
-            }
+            });
+
+            // app.add_window(&window);
+            // window.show();
+
         });
 
-        // app.add_window(&window);
-        // window.show();
 
-    });
+        let res = app.run();
 
-
-    let res = app.run();
-
-    unsafe {
-        gstreamer::deinit();
+        unsafe {
+            gstreamer::deinit();
+        }
+        return res
+    } else {
+        let x = ClockTime::from_seconds(10);
+        format_clock(x);
     }
-    res
+    ExitCode::SUCCESS
 }

@@ -1,17 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface>
     <template class="VideoPlayer" parent="GtkBox">
+        <style><class name="video-player"></class></style>
         <property name="visible">true</property>
+        <property name="valign">center</property>
+        <property name="hexpand">true</property>
         <child>
             <object class="GtkBox" id="vbox">
+                <style><class name="v-box"></class></style>
                 <property name="orientation">vertical</property>
-                <property name="margin-end">10</property>
-                <property name="margin-start">10</property>
-
+                <property name="height-request">400</property>
+                <property name="width-request">300</property>
                 <child>
                     <object class="GtkBox" id="hboxtop">
                         <property name="spacing">10</property>
                         <property name="halign">center</property>
+                        <property name="valign">center</property>
                         <property name="margin-top">20</property>
                         <property name="margin-bottom">20</property>
                         <property name="margin-end">10</property>
@@ -44,7 +48,7 @@
                     <object class="GtkBox" id="scale_parent">
                         <style><class name="seek-bar-box"></class></style>
                         <property name="hexpand">true</property>
-                        <property name="vexpand">false</property>
+                        <property name="vexpand">true</property>
                         <child>
                             <object class="GtkScale" id="seek_bar">
                             <style><class name="seek-bar"></class></style>

@@ -8,6 +8,14 @@
 
 .video-container {
     background-color:crimson;
+    padding: 0;
+    margin: 0;
+}
+
+.flow {
+    background-color: coral;
+    padding: 0px;
+    margin: 0px;
 }
 
 .split-container {
@@ -26,3 +34,15 @@
     padding: 0px;
     min-width: 10px;
 }
+/* 
+.wow {
+    background-color: red;
+    margin: 0;
+    padding: 0;
+}
+
+.buttons {
+    background-color: blueviolet;
+    margin: 0;
+    padding: 0;
+} */

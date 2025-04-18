@@ -1,8 +1,15 @@
 .seek-bar-box {
-    
 }
 
 .seek-bar {
     margin: 0;
     padding: 5px;
+}
+
+.v-box {
+    background-color: aqua;
+}
+
+.video-player {
+    background-color: blueviolet;
 }

@@ -214,7 +214,7 @@ impl VideoPlayer {
         let gesture = gtk::GestureClick::new();
         gesture.connect_pressed(glib::clone!(
             #[weak(rename_to = is_dragging_weak)] imp.is_dragging,
-            move |_,_,x,y| {
+            move |_,_,_x,_y| {
                 //println!("---------------------Left click Begin at: x: {x}, y: {y}");
                 is_dragging_weak.set(true);
             }
@@ -223,7 +223,7 @@ impl VideoPlayer {
         gesture.connect_released(glib::clone!(
             #[weak(rename_to = this)] self,
             #[weak(rename_to = is_dragging_weak)] imp.is_dragging,
-            move |_,_,x,y| {
+            move |_,_,_x,_y| {
                 //println!("---------------------Left click Ends at: x: {x}, y: {y}");
                 this.update_scale_value();
                 is_dragging_weak.set(false);                

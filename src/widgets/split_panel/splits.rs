@@ -56,9 +56,9 @@ impl VideoSegment {
         imp.segments.borrow().len()
     }
 
-    pub fn get_segments(&self, index: usize) -> (Option<u64>, Option<u64>) {
+    pub fn get_segment_count(&self) -> usize {
         let imp = imp::VideoSegment::from_obj(self);
-        (imp.segments.borrow()[index].time, imp.segments.borrow()[index].duration)
+        imp.segments.borrow().len()
     }
 
     pub fn set_name(&self, new_name: String) {
@@ -89,5 +89,17 @@ impl VideoSegment {
         let seg = &mut imp.segments.borrow_mut()[index];
         seg.time = Some(time);
         seg.duration = Some(duration);
+    }
+
+    pub fn set_time(&self, index: usize, time: u64) {
+        let imp = imp::VideoSegment::from_obj(self);
+        let seg = &mut imp.segments.borrow_mut()[index];
+        seg.time = Some(time);
+    }
+
+    pub fn set_duration(&self, index: usize, duration: u64) {
+        let imp = imp::VideoSegment::from_obj(self);
+        let seg = &mut imp.segments.borrow_mut()[index];
+        seg.time = Some(duration);
     }
 }

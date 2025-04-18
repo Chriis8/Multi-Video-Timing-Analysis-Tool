@@ -1,13 +1,19 @@
 mod video_pipeline;
 use gio::ListStore;
-use glib::{random_int_range, ExitCode};
+use glib::{random_int_range, ExitCode, prelude::ObjectExt};
 use gstreamer::ClockTime;
-use gtk::{ColumnViewColumn, ListItem, SingleSelection};
-use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button, ColumnView, CssProvider, Label, StringObject, Entry};
+use gtk::{ColumnViewColumn, FlowBox, FlowBoxChild, ListItem, SelectionMode, SingleSelection};
+use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button, ColumnView, CssProvider, Entry, Label};
 use gstgtk4;
 mod widgets;
 use widgets::video_player_widget::video_player::VideoPlayer;
 use widgets::split_panel::splits::VideoSegment;
+
+#[derive(Clone)]
+enum SegmentField {
+    Time,
+    Duration,
+}
 
 fn load_css(path: &str) {
     let provider = CssProvider::new();
@@ -27,7 +33,7 @@ fn load_css(path: &str) {
 
 fn build_ui(app: &Application) -> Builder {
     let builder = Builder::from_resource("/mainwindow/mwindow.ui");
-    let column_builder = Builder::from_resource("/spanel/spanel.ui");
+    let _column_builder = Builder::from_resource("/spanel/spanel.ui");
 
     load_css("src\\widgets\\main_window\\style.css");
     load_css("src\\widgets\\split_panel\\style.css");
@@ -39,9 +45,9 @@ fn build_ui(app: &Application) -> Builder {
     let add_row_button: Button  = builder.object("add_row_button").expect("Failed to get add_row_button from UI File");
     let remove_column_button: Button = builder.object("remove_column_button").expect("Failed to get remove_column_button from UI File");
     let remove_row_button: Button = builder.object("remove_row_button").expect("Failed to get remove_row_button from UI File");
-
+    let video_container: FlowBox = builder.object("video_container").expect("Failed to get video_container from UI File");
+    
     let (model, column_view) = create_column_view();
-
     column_view_container.append(&column_view);
 
     let column_view_clone = column_view.clone();
@@ -70,15 +76,22 @@ fn build_ui(app: &Application) -> Builder {
         }
     });
 
+    
+    let initial_child_count = 0_usize;
+    store_data(&video_container, "count", initial_child_count);
+
     let button: Button = builder.object("new_video_player_button").expect("Failed to get button");
     let builder_clone = builder.clone();
     let column_view_clone = column_view.clone();
     let model_clone = model.clone();
+    let video_container_clone = video_container.clone();
     button.connect_clicked(move |_| {
-        let video_container: Box = builder_clone.object("video_container").expect("failed to get video_container from UI file");
-        let column_count = column_view_clone.columns().n_items() - 1;
+        //let video_container: FlowBox = builder_clone.object("video_container").expect("failed to get video_container from UI file");
+        let count = unsafe{ get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() };
+        println!("Count before operation: {count}");
+        //let column_count = column_view_clone.columns().n_items() - 1;
         let window: ApplicationWindow = builder_clone.object("main_window").expect("Failed to get main_window from UI file");
-        let new_player = VideoPlayer::new(column_count);
+        let new_player = VideoPlayer::new(*count as u32);
         new_player.setup_event_handlers(window);
         
         let model_clone_clone = model_clone.clone();
@@ -118,11 +131,32 @@ fn build_ui(app: &Application) -> Builder {
             print_vec(&model_clone_clone);
             None
         });
-        video_container.append(&new_player);
-
+        
         let name = random_int_range(0, 99);
         let model_clone_clone = model_clone.clone();
-        add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), column_count as usize);
+        add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), *count, SegmentField::Time);
+        add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), *count, SegmentField::Duration);
+        for i in 0..model_clone_clone.n_items() {
+            let seg = model_clone_clone.item(i).and_downcast::<VideoSegment>().unwrap();
+            seg.add_segment(1, 2);
+        }
+
+        video_container_clone.set_homogeneous(true);
+        let number_of_columns = (*count as u32 + 1).clamp(1,3);
+        video_container_clone.set_max_children_per_line(number_of_columns);
+        video_container_clone.set_min_children_per_line(number_of_columns);
+        video_container_clone.set_valign(gtk::Align::Fill);
+        video_container_clone.set_selection_mode(SelectionMode::None);
+        video_container_clone.set_column_spacing(0);
+
+        // let flow_child = gtk::FlowBoxChild::new();
+        // flow_child.set_hexpand(true);
+        // flow_child.set_halign(gtk::Align::Fill);
+        // flow_child.set_css_classes(&["flow"]);
+        // flow_child.set_child(Some(&new_player));
+        video_container_clone.append(&new_player);
+
+        store_data(&video_container_clone, "count", count + 1);
     });
 
     let button: Button = builder.object("print_splits_button").expect("Failed to get new split button");
@@ -130,8 +164,6 @@ fn build_ui(app: &Application) -> Builder {
     button.connect_clicked(move |_| {
         print_vec(&model_clone);
     });
-
-
 
     app.add_window(&window);
     window.show();
@@ -172,6 +204,26 @@ fn format_clock(time: ClockTime) -> String {
     ret
 }
 
+fn clocktime_from_parts(minutes: String, seconds: String, subseconds: String) -> Option<ClockTime> {
+    let minutes: u64 = minutes.parse().unwrap();
+    let seconds: u64 = seconds.parse().unwrap();
+
+    let nanos = match subseconds.len() {
+        0 => 0,
+        1 => subseconds.parse::<u64>().unwrap() * 100_000_000, // 0.1s = 100_000_000ns
+        2 => subseconds.parse::<u64>().unwrap() * 10_000_000,  // 0.01s = 10_000_000ns
+        3 => subseconds.parse::<u64>().unwrap() * 1_000_000,   // 0.001s = 1_000_000ns
+        4 => subseconds.parse::<u64>().unwrap() * 100_000,     // 0.0001s
+        5 => subseconds.parse::<u64>().unwrap() * 10_000,      // ...
+        6 => subseconds.parse::<u64>().unwrap() * 1_000,
+        7 => subseconds.parse::<u64>().unwrap() * 100,
+        8 => subseconds.parse::<u64>().unwrap() * 10,
+        _ => subseconds.parse::<u64>().unwrap() // assume already in nanoseconds
+    };
+    let total_nanos = minutes * 60 * 1_000_000_000 + seconds * 1_000_000_000 + nanos;
+    Some(ClockTime::from_nseconds(total_nanos))
+}
+
 fn create_column_view() -> (ListStore, ColumnView) {
     // Create a ListStore to hold VideoSegment data
     let model = gio::ListStore::new::<VideoSegment>();
@@ -187,38 +239,52 @@ fn create_column_view() -> (ListStore, ColumnView) {
     (model, column_view)
 }
 
-fn add_column(column_view: &gtk::ColumnView, model: &ListStore, title: &str, index: usize) {
-    //Adding row information was done when the add column button was clicked. That button is now removed and the functionality should be moved here to update liststore items.
-    for i in 0..model.n_items() {
-        let seg = model.item(i).and_downcast::<VideoSegment>().unwrap();
-        seg.add_segment(1, 2);
-    }
-
+fn add_column(column_view: &gtk::ColumnView, _model: &ListStore, title: &str, index: usize, field: SegmentField) {
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
+        let entry = gtk::Entry::new();
+        list_item.set_child(Some(&entry));
     });
     
     factory.connect_bind(move |_, list_item| {
-        //Broken if you add new video player after already creating some rows
-        let label = list_item.child().unwrap().downcast::<gtk::Label>().unwrap();
+        let entry = list_item.child().unwrap().downcast::<gtk::Entry>().unwrap();
         if let Some(item) = list_item.item().and_downcast::<VideoSegment>() {
             match item.get_segment(index) {
                 Some(data) => {
-                    let time = data.time;
-                    let duration = data.duration;
-                    if let (Some(t), Some(d)) = (time, duration) {
-                        let clock_time = ClockTime::from_nseconds(t);
-                        let clock_duration = ClockTime::from_nseconds(d);
-                        let formatted_time = format_clock(clock_time);
-                        let formatted_duration = format_clock(clock_duration);
-                        label.set_text(format!("{formatted_time}, {formatted_duration}").as_str())
-                    } else {
-                        label.set_text("None, None");
-                    }
+                    let text = match field {
+                        SegmentField::Time => {
+                            data.time.map_or("none".to_string(), |t| format_clock(ClockTime::from_nseconds(t)))
+                        },
+                        SegmentField::Duration => {
+                            data.duration.map_or("none".to_string(), |d| format_clock(ClockTime::from_nseconds(d)))
+                        }
+                    };
+                    entry.set_text(text.as_str());
+
+                    entry.connect_changed(glib::clone!(
+                        #[weak(rename_to = seg)] item,
+                        #[strong] field,
+                        move |entry| {
+                            let mut text = entry.text().to_string();
+                            let minutes: String = text.drain(..text.find(":").unwrap()).collect();
+                            text.remove(0);
+                            let seconds: String = text.drain(..text.find(".").unwrap()).collect();
+                            text.remove(0);
+                            let subsecond: String = text;
+                            let time = clocktime_from_parts(minutes, seconds, subsecond).unwrap().nseconds();
+                            match field {
+                                SegmentField::Time => {
+                                    seg.set_time(index, time);
+                                },
+                                SegmentField::Duration => {
+                                    seg.set_duration(index, time);
+                                }
+                            }
+                            
+                        }
+                    ));
                 } 
-                None => label.set_text("Empty"),
+                None => entry.set_text("Empty"),
             };
         }
     });
@@ -303,6 +369,16 @@ fn remove_row(model: &gio::ListStore, row_index: u32) {
     model.remove(row_index);
 }
 
+fn store_data<T: 'static>(widget: &impl ObjectExt, key: &str, value: T) {
+    unsafe {
+        widget.set_data(key, value);
+    }
+}
+
+fn get_data<T: 'static>(widget: &impl ObjectExt, key: &str) -> Option<std::ptr::NonNull<T>> {
+    unsafe { widget.data::<T>(key) }
+}
+
 fn main() -> glib::ExitCode {
     let run_app = true;
     if run_app {
@@ -327,34 +403,18 @@ fn main() -> glib::ExitCode {
             
             let builder = build_ui(app);
 
-            // let window = ApplicationWindow::new(app);
-
-            // window.set_default_size(800, 600);
-            // window.set_title(Some("Video Player"));
-
-            // let main_box = Box::new(gtk::Orientation::Horizontal, 10);
-
-            
-
-            // window.set_child(Some(&main_box));
-
-            // window.show();
             let builder_clone = builder.clone();
             app.connect_shutdown(move |_| {
                 println!("shutting down");
-                let video_container: Box = builder_clone.object("video_container").expect("failed to get video_container from UI file");
-                
+                let video_container: FlowBox = builder_clone.object("video_container").expect("failed to get video_container from UI file");
                 while let Some(child) = video_container.last_child() {
-                    let video = child.downcast::<VideoPlayer>().unwrap();
+                    let video = child.downcast::<FlowBoxChild>().unwrap();
                     unsafe {
                         video.unparent(); 
                         video.run_dispose();
                     }
                 }
             });
-
-            // app.add_window(&window);
-            // window.show();
 
         });
 
@@ -366,8 +426,45 @@ fn main() -> glib::ExitCode {
         }
         return res
     } else {
-        let x = ClockTime::from_seconds(10);
-        format_clock(x);
+        gstreamer::init().unwrap();
+        gtk::init().unwrap();
+
+        std::env::set_var("GTK_THEME", "Adwaita:dark");
+
+        gstgtk4::plugin_register_static().expect("Failed to register gstgtk4 plugin");
+
+        gio::resources_register_include!("vplayer.gresource")
+            .expect("Failed to register resources.");
+
+        gio::resources_register_include!("mwindow.gresource")
+            .expect("Failed to register resources.");
+
+        gio::resources_register_include!("spanel.gresource")
+            .expect("Failed to register resources.");
+        
+        let app = gtk::Application::new(None::<&str>, gtk::gio::ApplicationFlags::FLAGS_NONE);
+        app.connect_activate(|app| {
+
+            let window = ApplicationWindow::new(app);
+
+            window.set_default_size(800, 600);
+            window.set_title(Some("Video Player"));
+
+            load_css("src\\widgets\\main_window\\style.css");
+
+            let main_box = Box::new(gtk::Orientation::Horizontal, 10);
+
+            window.set_child(Some(&main_box));
+            window.show();
+        });
+
+
+        let res = app.run();
+
+        unsafe {
+            gstreamer::deinit();
+        }
+        return res
     }
     ExitCode::SUCCESS
 }

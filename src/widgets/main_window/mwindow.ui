@@ -45,7 +45,7 @@
                             </object>
                         </child> -->
 
-                        <child>
+                        <!-- <child>
                             <object class="GtkButton" id="add_row_button">
                                 <property name="label">Add Row</property>
                             </object>
@@ -61,7 +61,7 @@
                             <object class="GtkButton" id="remove_row_button">
                                 <property name="label">Remove </property>
                             </object>
-                        </child>
+                        </child> -->
                         
                         <child>
                             <object class="GtkScrolledWindow" id="scroll-window">

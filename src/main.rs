@@ -1,8 +1,9 @@
 mod video_pipeline;
 use gio::ListStore;
-use glib::{random_int_range, ExitCode, prelude::ObjectExt};
+use glib::ffi::g_pattern_match_simple;
+use glib::{random_int_range, ExitCode, prelude::ObjectExt, Regex, RegexCompileFlags, RegexMatchFlags, GString};
 use gstreamer::ClockTime;
-use gtk::{ColumnViewColumn, FlowBox, FlowBoxChild, ListItem, SelectionMode, SingleSelection};
+use gtk::{ColumnViewColumn, EventControllerFocus, FlowBox, FlowBoxChild, ListItem, SelectionMode, SingleSelection};
 use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button, ColumnView, CssProvider, Entry, Label};
 use gstgtk4;
 mod widgets;
@@ -42,9 +43,9 @@ fn build_ui(app: &Application) -> Builder {
     //let column_view: ColumnView = column_builder.object("column_view").expect("Failed to get column_view from UI File");
     let column_view_container: Box = builder.object("split_container").expect("Failed to column_view_container from UI File");
     //let add_column_button: Button = builder.object("add_column_button").expect("Failed to get add_column_button from UI File");
-    let add_row_button: Button  = builder.object("add_row_button").expect("Failed to get add_row_button from UI File");
-    let remove_column_button: Button = builder.object("remove_column_button").expect("Failed to get remove_column_button from UI File");
-    let remove_row_button: Button = builder.object("remove_row_button").expect("Failed to get remove_row_button from UI File");
+    //let add_row_button: Button  = builder.object("add_row_button").expect("Failed to get add_row_button from UI File");
+    //let remove_colusmn_button: Button = builder.object("remove_column_button").expect("Failed to get remove_column_button from UI File");
+    //let remove_row_button: Button = builder.object("remove_row_button").expect("Failed to get remove_row_button from UI File");
     let video_container: FlowBox = builder.object("video_container").expect("Failed to get video_container from UI File");
     
     let (model, column_view) = create_column_view();
@@ -53,28 +54,28 @@ fn build_ui(app: &Application) -> Builder {
     let column_view_clone = column_view.clone();
     add_name_column(&column_view_clone, "Segment Name");
 
-    let model_clone = model.clone();
-    let column_view_clone = column_view.clone();
-    add_row_button.connect_clicked(move |_| { //adds an item to liststore
-        add_empty_row(&column_view_clone, &model_clone);
-    });
+    // let model_clone = model.clone();
+    // let column_view_clone = column_view.clone();
+    // add_row_button.connect_clicked(move |_| { //adds an item to liststore
+    //     add_empty_row(&column_view_clone, &model_clone);
+    // });
 
-    let column_view_clone = column_view.clone();
-    remove_column_button.connect_clicked(move |_| {
-        remove_column(&column_view_clone);
-    });
+    // let column_view_clone = column_view.clone();
+    // remove_column_button.connect_clicked(move |_| {
+    //     remove_column(&column_view_clone);
+    // });
 
-    let model_clone = model.clone();
-    let column_view_clone = column_view.clone();
-    remove_row_button.connect_clicked(move |_| {
-        if let Some(selection_model) = column_view_clone.model().and_downcast::<SingleSelection>() {
-            let selected_index = selection_model.selected();
-            println!("Removing Row {selected_index}");
-            remove_row(&model_clone, selected_index);
-        } else {
-            eprintln!("Couldnt get selection model");
-        }
-    });
+    // let model_clone = model.clone();
+    // let column_view_clone = column_view.clone();
+    // remove_row_button.connect_clicked(move |_| {
+    //     if let Some(selection_model) = column_view_clone.model().and_downcast::<SingleSelection>() {
+    //         let selected_index = selection_model.selected();
+    //         println!("Removing Row {selected_index}");
+    //         remove_row(&model_clone, selected_index);
+    //     } else {
+    //         eprintln!("Couldnt get selection model");
+    //     }
+    // });
 
     
     let initial_child_count = 0_usize;
@@ -260,12 +261,26 @@ fn add_column(column_view: &gtk::ColumnView, _model: &ListStore, title: &str, in
                         }
                     };
                     entry.set_text(text.as_str());
+                    store_data(&entry, "data", text);
 
-                    entry.connect_changed(glib::clone!(
+                    let focus_control = EventControllerFocus::new();
+                    
+                    let entry_clone = entry.clone();
+                    entry.connect_activate(glib::clone!(
                         #[weak(rename_to = seg)] item,
                         #[strong] field,
-                        move |entry| {
-                            let mut text = entry.text().to_string();
+                        #[weak(rename_to = entry)] entry_clone,
+                        move |_| {
+                            let input = entry.text().to_string();
+                            let pattern = r"^[0-5][0-9]:[0-5][0-9]\.\d{3}$";
+                            let re = Regex::match_simple(pattern, input.clone(), RegexCompileFlags::empty(), RegexMatchFlags::empty());
+                            if !re {
+                                println!("Entry is not in valid format");
+                                let previous_text = unsafe { get_data::<String>(&entry, "data").unwrap().as_ref() };
+                                entry.set_text(previous_text.as_str());
+                                return;
+                            }
+                            let mut text = input.clone();
                             let minutes: String = text.drain(..text.find(":").unwrap()).collect();
                             text.remove(0);
                             let seconds: String = text.drain(..text.find(".").unwrap()).collect();
@@ -280,9 +295,47 @@ fn add_column(column_view: &gtk::ColumnView, _model: &ListStore, title: &str, in
                                     seg.set_duration(index, time);
                                 }
                             }
-                            
+                            println!("Stored value {input} to entry");
+                            store_data(&entry, "data", input);
                         }
                     ));
+                    
+                    let entry_clone = entry.clone();
+                    focus_control.connect_leave(glib::clone!(
+                        #[weak(rename_to = seg)] item,
+                        #[strong] field,
+                        #[weak(rename_to = entry)] entry_clone,
+                        move |_| {
+                            let input = entry.text().to_string();
+                            let pattern = r"^[0-5][0-9]:[0-5][0-9]\.\d{3}$";
+                            let re = Regex::match_simple(pattern, input.clone(), RegexCompileFlags::empty(), RegexMatchFlags::empty());
+                            if !re {
+                                println!("Entry is not in valid format");
+                                let previous_text = unsafe { get_data::<String>(&entry, "data").unwrap().as_ref() };
+                                entry.set_text(previous_text.as_str());
+                                return;
+                            }
+                            let mut text = input.clone();
+                            let minutes: String = text.drain(..text.find(":").unwrap()).collect();
+                            text.remove(0);
+                            let seconds: String = text.drain(..text.find(".").unwrap()).collect();
+                            text.remove(0);
+                            let subsecond: String = text;
+                            let time = clocktime_from_parts(minutes, seconds, subsecond).unwrap().nseconds();
+                            match field {
+                                SegmentField::Time => {
+                                    seg.set_time(index, time);
+                                },
+                                SegmentField::Duration => {
+                                    seg.set_duration(index, time);
+                                }
+                            }
+                            println!("Stored value {input} to entry");
+                            store_data(&entry, "data", input);
+                        }
+                    ));
+                    
+                    entry.add_controller(focus_control);
                 } 
                 None => entry.set_text("Empty"),
             };
@@ -380,8 +433,8 @@ fn get_data<T: 'static>(widget: &impl ObjectExt, key: &str) -> Option<std::ptr::
 }
 
 fn main() -> glib::ExitCode {
-    let run_app = true;
-    if run_app {
+    let run_app = 0;
+    if run_app == 0 {
         gstreamer::init().unwrap();
         gtk::init().unwrap();
 
@@ -425,7 +478,7 @@ fn main() -> glib::ExitCode {
             gstreamer::deinit();
         }
         return res
-    } else {
+    } else if run_app == 1 {
         gstreamer::init().unwrap();
         gtk::init().unwrap();
 
@@ -465,6 +518,8 @@ fn main() -> glib::ExitCode {
             gstreamer::deinit();
         }
         return res
+    } else if run_app == 2 {
     }
+    
     ExitCode::SUCCESS
 }

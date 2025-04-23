@@ -28,6 +28,7 @@ pub struct VideoPipeline {
 
 
 impl VideoPipeline {
+    // Creates new VideoPipeline
     pub fn new() -> Self {
         Self {
             gtksink: gstreamer::ElementFactory::make("gtk4paintablesink").property("sync", true).build().unwrap(),
@@ -36,15 +37,20 @@ impl VideoPipeline {
         }
     }
 
+    // Sets state to NULL to be cleaned up
     pub fn cleanup(&mut self) {
         self.pipeline.set_state(gstreamer::State::Null).unwrap();
     }
 
+    // Resets object to default values
     pub fn reset(&mut self) {
         self.cleanup();        
         *self = Self::new();
     }
 
+    // Updates rate of video playback
+    //  1.0 - forward
+    // -1.0 - backward
     fn set_rate(&self, rate: f64) -> bool {
     
         eprintln!("---------- (Send seek event Before) video time: {:?}", self.pipeline.query_position::<gstreamer::ClockTime>());
@@ -80,10 +86,12 @@ impl VideoPipeline {
         true
     }
 
+    // Sets video playback to inputted ClockTime
     pub fn seek_position(&self, position: gstreamer::ClockTime) -> Result<(), glib::BoolError> {
         self.pipeline.seek_simple(gstreamer::SeekFlags::FLUSH, position)
     }
 
+    // Retrieves the percent complete the video playback is at
     pub fn position_to_percent(&self) -> Result<f64, glib::Error> {
         let position = match self.pipeline.query_position::<gstreamer::ClockTime>() {
             Some(pos) => pos,
@@ -109,6 +117,7 @@ impl VideoPipeline {
         Ok(percent)
     }
 
+    // Retrieves the position as the percentage of the total duration of the video playback
     pub fn percent_to_position(&self, percent: f64) -> Result<u64, glib::Error> {
         let total_duration = match self.pipeline.query_duration::<gstreamer::ClockTime>() {
             Some(dur) => dur.nseconds(),
@@ -125,10 +134,12 @@ impl VideoPipeline {
         Ok(new_position)
     }
 
+    // Sets up video pipeline
     pub fn build_pipeline(&self, uri: Option<&str>) {
         let uri = uri.unwrap();
         println!("building pipeline from {uri}");
         
+        // Sets up pipeline elements
         let source = gstreamer::ElementFactory::make("uridecodebin")
             .name("source")
             .property("uri", uri)
@@ -160,17 +171,17 @@ impl VideoPipeline {
             .expect("Failed to build video scale element");
 
 
+        // Connects elements in pipeline
         self.pipeline.add_many([&source, &audio_convert, &audio_resample, &audio_sink, &video_convert, &video_rate, &video_scale, &self.gtksink]).unwrap();
-        
         gstreamer::Element::link_many([&audio_convert, &audio_resample, &audio_sink])
-        .expect("Failed to link audio elements");
-    
+            .expect("Failed to link audio elements");
         gstreamer::Element::link_many([&video_convert, &video_rate, &video_scale, &self.gtksink])
-        .expect("Failed to link video elements");
+            .expect("Failed to link video elements");
 
         let audio_convert_weak = audio_convert.downgrade();
         let video_convert_weak = video_convert.downgrade();
-
+        
+        // Connects source pads to video and audio sink
         source.connect_pad_added(move |src, src_pad| {
             println!("Recieved new pad {} from {}", src_pad.name(), src.name());
 
@@ -197,6 +208,7 @@ impl VideoPipeline {
                 .expect("Failed to get first strcuture")
                 .name();
 
+            // Links audio pad
             if let Some(audio_sink_pad) = audio_convert.static_pad("sink") {
                 if audio_sink_pad.is_linked() {
                     println!("Audio pad is already linked. Ignoring");
@@ -208,7 +220,8 @@ impl VideoPipeline {
                     println!("Failed to link {} to audio pad", pad_type);
                 }
             }
-        
+            
+            // Link video pad
             if let Some(video_sink_pad) = video_convert.static_pad("sink") {
                 if video_sink_pad.is_linked() {
                     println!("Video pad is already linked. Ignoring");
@@ -228,18 +241,22 @@ impl VideoPipeline {
         
     }
 
+    // Returns paintable object for gtk widget
     pub fn get_paintable(&self) -> gdk::Paintable {
         self.gtksink.property::<gdk::Paintable>("paintable")
     }
 
+    // Returns videos current position in ClockTime
     pub fn get_position(&self) -> Option<gstreamer::ClockTime> {
         self.pipeline.query_position::<gstreamer::ClockTime>()    
     }
 
+    // Gets video bus
     pub fn get_bus(&self) -> gstreamer::Bus {
         self.pipeline.bus().unwrap()
     }
 
+    // Sets the video to the playing state
     pub fn play_video(&self) {
         let (_,current_state,_) = self.pipeline.state(gstreamer::ClockTime::NONE);
         let new_state = match current_state {
@@ -258,29 +275,34 @@ impl VideoPipeline {
         self.pipeline.set_state(new_state).expect("Failed to set state");
     }
 
+    // Sets the video to the paused state
     pub fn pause_video(&self) {
         self.pipeline
             .set_state(gstreamer::State::Paused)
             .expect("Failed to set pipeline state to Paused");
     }
 
+    // Sets the video to the Null state
     pub fn stop_video(&self) {
         self.pipeline
         .set_state(gstreamer::State::Null)
         .expect("Failed to set pipeline state to Null");
 }
 
+    // Moves video one frame forward
     pub fn frame_forward(&self) {
         eprintln!("---------- (Frame forwards Before) video time: {:?}", self.pipeline.query_position::<gstreamer::ClockTime>());
         if self.pipeline.current_state() != gstreamer::State::Paused {
             eprintln!("Can't step 1 frame forward. Video is not paused");
             return;
         }
+        // Sets direction to forward
         let mut state = self.state.borrow_mut();
         if state.direction == PlaybackDirection::Reverse {
             self.set_rate(1.);
             state.direction = PlaybackDirection::Forward;
         }
+        // Steps 1 frame
         let step_event = Step::new(gstreamer::format::Buffers::ONE, 1.0, true, false);
         println!("Attempting to move one frame forward");
         let success = self.pipeline.send_event(step_event);
@@ -290,17 +312,20 @@ impl VideoPipeline {
         eprintln!("---------- (Frame forwards After) video time: {:?}", self.pipeline.query_position::<gstreamer::ClockTime>());
     }
 
+    // Moves video one frame backward
     pub fn frame_backward(&self) {
         eprintln!("---------- (Frame backwards Before) video time: {:?}", self.pipeline.query_position::<gstreamer::ClockTime>());
         if self.pipeline.current_state() != gstreamer::State::Paused {
             eprintln!("Can't step 1 frame backward. Video is not paused");
             return;
         }
+        // Set video direction backward
         let mut state = self.state.borrow_mut();
         if state.direction == PlaybackDirection::Forward {
             self.set_rate(-1.);
             state.direction = PlaybackDirection::Reverse;
         }
+        // Step 1 frame
         let step_event = Step::new(gstreamer::format::Buffers::ONE, 1.0, true, false);
         println!("Attempting to move one frame backward");
         let success = self.pipeline.send_event(step_event);
@@ -310,6 +335,7 @@ impl VideoPipeline {
         eprintln!("---------- (Frame backwards After) video time: {:?}", self.pipeline.query_position::<gstreamer::ClockTime>());
     }
 
+    // Prints the currect frame the video is on
     pub fn get_current_frame(&self) {
         let current_time = self.pipeline.query_position::<gstreamer::format::Time>().unwrap();
         

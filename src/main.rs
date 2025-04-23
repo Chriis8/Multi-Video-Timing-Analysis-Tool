@@ -1,9 +1,8 @@
 mod video_pipeline;
 use gio::ListStore;
-use glib::ffi::g_pattern_match_simple;
-use glib::{random_int_range, ExitCode, prelude::ObjectExt, Regex, RegexCompileFlags, RegexMatchFlags, GString};
+use glib::{random_int_range, ExitCode, prelude::ObjectExt, Regex, RegexCompileFlags, RegexMatchFlags};
 use gstreamer::ClockTime;
-use gtk::{ColumnViewColumn, EventControllerFocus, FlowBox, FlowBoxChild, ListItem, SelectionMode, SingleSelection};
+use gtk::{ColumnViewColumn, EventControllerFocus, FlowBox, FlowBoxChild, ListItem, SelectionMode};
 use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button, ColumnView, CssProvider, Entry, Label};
 use gstgtk4;
 mod widgets;
@@ -40,44 +39,22 @@ fn build_ui(app: &Application) -> Builder {
     load_css("src\\widgets\\split_panel\\style.css");
 
     let window: ApplicationWindow = builder.object("main_window").expect("Failed to get main_window from UI file");
-    //let column_view: ColumnView = column_builder.object("column_view").expect("Failed to get column_view from UI File");
     let column_view_container: Box = builder.object("split_container").expect("Failed to column_view_container from UI File");
-    //let add_column_button: Button = builder.object("add_column_button").expect("Failed to get add_column_button from UI File");
-    //let add_row_button: Button  = builder.object("add_row_button").expect("Failed to get add_row_button from UI File");
-    //let remove_colusmn_button: Button = builder.object("remove_column_button").expect("Failed to get remove_column_button from UI File");
-    //let remove_row_button: Button = builder.object("remove_row_button").expect("Failed to get remove_row_button from UI File");
     let video_container: FlowBox = builder.object("video_container").expect("Failed to get video_container from UI File");
-    
+
+    video_container.set_homogeneous(true);
+    video_container.set_valign(gtk::Align::Fill);
+    video_container.set_selection_mode(SelectionMode::None);
+    video_container.set_column_spacing(0);
+
     let (model, column_view) = create_column_view();
     column_view_container.append(&column_view);
 
+    // Adds first row of segment names to the split table
     let column_view_clone = column_view.clone();
     add_name_column(&column_view_clone, "Segment Name");
-
-    // let model_clone = model.clone();
-    // let column_view_clone = column_view.clone();
-    // add_row_button.connect_clicked(move |_| { //adds an item to liststore
-    //     add_empty_row(&column_view_clone, &model_clone);
-    // });
-
-    // let column_view_clone = column_view.clone();
-    // remove_column_button.connect_clicked(move |_| {
-    //     remove_column(&column_view_clone);
-    // });
-
-    // let model_clone = model.clone();
-    // let column_view_clone = column_view.clone();
-    // remove_row_button.connect_clicked(move |_| {
-    //     if let Some(selection_model) = column_view_clone.model().and_downcast::<SingleSelection>() {
-    //         let selected_index = selection_model.selected();
-    //         println!("Removing Row {selected_index}");
-    //         remove_row(&model_clone, selected_index);
-    //     } else {
-    //         eprintln!("Couldnt get selection model");
-    //     }
-    // });
-
     
+    // Add data to video_container to keep track of the number of active videos
     let initial_child_count = 0_usize;
     store_data(&video_container, "count", initial_child_count);
 
@@ -86,25 +63,27 @@ fn build_ui(app: &Application) -> Builder {
     let column_view_clone = column_view.clone();
     let model_clone = model.clone();
     let video_container_clone = video_container.clone();
+    // Adds new video player and new columns to split table
     button.connect_clicked(move |_| {
-        //let video_container: FlowBox = builder_clone.object("video_container").expect("failed to get video_container from UI file");
         let count = unsafe{ get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() };
-        println!("Count before operation: {count}");
-        //let column_count = column_view_clone.columns().n_items() - 1;
         let window: ApplicationWindow = builder_clone.object("main_window").expect("Failed to get main_window from UI file");
+        
+        // Sets up new video player
         let new_player = VideoPlayer::new(*count as u32);
         new_player.setup_event_handlers(window);
         
         let model_clone_clone = model_clone.clone();
         let column_view_clone_clone = column_view_clone.clone();
+        // Listens to the split button from a video player
+        // args[1] ID u32: index from the video player thats button was pressed
+        // args[2] Position u64: time in nano seconds that the video player playback head was at when the button was pressed
         new_player.connect_local("button-clicked", false, move |args| {
             let id: u32 = args[1].get().unwrap();
             let position: u64 = args[2].get().unwrap();
-            println!("Main Scope: button clicked ----- {id} | {position}");
             let row_count = model_clone_clone.n_items();
-            println!("row count: {row_count}");
             
             let mut update_row = row_count;
+            // Finds first row without a time and duration
             for i in 0..row_count {
                 let segment = model_clone_clone.item(i).and_downcast::<VideoSegment>().unwrap();
                 match segment.get_segment(id as usize) {
@@ -121,45 +100,44 @@ fn build_ui(app: &Application) -> Builder {
                     None => break
                 };
             }
+            // New row is added if there are no empty rows
             if update_row == row_count {
-                add_row(&column_view_clone_clone, &model_clone_clone, position, position);
-            } else {
-                let segment = model_clone_clone.item(update_row).and_downcast::<VideoSegment>().unwrap();
-                segment.set_segment(id as usize, position, position);
-                model_clone_clone.remove(update_row);
-                model_clone_clone.insert(update_row, &segment);
+                add_empty_row(&column_view_clone_clone, &model_clone_clone);
             }
-            print_vec(&model_clone_clone);
+            // Updates cell information at row: update_row and column: id with the new position and duration
+            let segment = model_clone_clone.item(update_row).and_downcast::<VideoSegment>().unwrap();
+            segment.set_segment(id as usize, position, position);
+            // Updates the table dislay
+            model_clone_clone.remove(update_row);
+            model_clone_clone.insert(update_row, &segment);
             None
         });
         
+        // Adds two columns to split table for each new video player
+        // Column 1: (Time) Split time -> time since the start of the clip
+        // Column 2: (Duration) Segment time -> time since the last split
         let name = random_int_range(0, 99);
         let model_clone_clone = model_clone.clone();
         add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), *count, SegmentField::Time);
         add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), *count, SegmentField::Duration);
+        // Updates the data in the liststore to include the two new rows with empty data
         for i in 0..model_clone_clone.n_items() {
             let seg = model_clone_clone.item(i).and_downcast::<VideoSegment>().unwrap();
             seg.add_segment(1, 2);
         }
 
-        video_container_clone.set_homogeneous(true);
+        // Updates formatting of the video players and adds the new video player to the container
         let number_of_columns = (*count as u32 + 1).clamp(1,3);
         video_container_clone.set_max_children_per_line(number_of_columns);
         video_container_clone.set_min_children_per_line(number_of_columns);
-        video_container_clone.set_valign(gtk::Align::Fill);
-        video_container_clone.set_selection_mode(SelectionMode::None);
-        video_container_clone.set_column_spacing(0);
-
-        // let flow_child = gtk::FlowBoxChild::new();
-        // flow_child.set_hexpand(true);
-        // flow_child.set_halign(gtk::Align::Fill);
-        // flow_child.set_css_classes(&["flow"]);
-        // flow_child.set_child(Some(&new_player));
         video_container_clone.append(&new_player);
 
+        // Updates video_container data keeping track of the active video players
         store_data(&video_container_clone, "count", count + 1);
     });
 
+    // Debug function to print the split data in liststore
+    // Used to make sure the split data is correctly being stored as this is separate from the displayed information in the table
     let button: Button = builder.object("print_splits_button").expect("Failed to get new split button");
     let model_clone = model.clone();
     button.connect_clicked(move |_| {
@@ -171,6 +149,7 @@ fn build_ui(app: &Application) -> Builder {
     builder
 }
 
+// Used to make sure the split data is correctly being stored as this is separate from the displayed information in the table
 fn print_vec(model: &ListStore) {
     println!("Splits");
     for i in 0..model.n_items() {
@@ -191,6 +170,8 @@ fn print_vec(model: &ListStore) {
     }
 }
 
+// Converts a GStreamer ClockTime to a String
+// Format: MM:SS.sss or HH:MM:SS.sss if hours exist
 fn format_clock(time: ClockTime) -> String {
     let mut ret = time.to_string();
     let hours_offset = ret.find(":").unwrap();
@@ -205,9 +186,13 @@ fn format_clock(time: ClockTime) -> String {
     ret
 }
 
-fn clocktime_from_parts(minutes: String, seconds: String, subseconds: String) -> Option<ClockTime> {
-    let minutes: u64 = minutes.parse().unwrap();
-    let seconds: u64 = seconds.parse().unwrap();
+// Converts time from String type formatted as MM:SS.sss to nanoseconds
+fn string_to_nseconds(time: &String) -> Option<u64> {
+    let (min, rest) = time.split_once(":").unwrap();
+    let (sec, subseconds) = rest.split_once(".").unwrap();
+
+    let minutes = min.parse::<u64>().unwrap();
+    let seconds = sec.parse::<u64>().unwrap();
 
     let nanos = match subseconds.len() {
         0 => 0,
@@ -222,14 +207,14 @@ fn clocktime_from_parts(minutes: String, seconds: String, subseconds: String) ->
         _ => subseconds.parse::<u64>().unwrap() // assume already in nanoseconds
     };
     let total_nanos = minutes * 60 * 1_000_000_000 + seconds * 1_000_000_000 + nanos;
-    Some(ClockTime::from_nseconds(total_nanos))
+    return Some(total_nanos);
 }
 
 fn create_column_view() -> (ListStore, ColumnView) {
     // Create a ListStore to hold VideoSegment data
     let model = gio::ListStore::new::<VideoSegment>();
     let model_clone = model.clone();
-    
+
     let selection_model = gtk::SingleSelection::new(Some(model_clone));
     selection_model.set_autoselect(false);
     selection_model.set_can_unselect(true);
@@ -240,18 +225,28 @@ fn create_column_view() -> (ListStore, ColumnView) {
     (model, column_view)
 }
 
+// Add new column to the column view
+// index: video player id NOT the column index 
+// field: Time or Duration
+// Each video player gets two columns one for time and one for duration
 fn add_column(column_view: &gtk::ColumnView, _model: &ListStore, title: &str, index: usize, field: SegmentField) {
     let factory = gtk::SignalListItemFactory::new();
+    // Creates the entry objects
     factory.connect_setup(move |_, list_item| {
         let entry = gtk::Entry::new();
         list_item.set_child(Some(&entry));
     });
-    
+
+    // Binds the stored data to the displayed entry objects
+    let model_clone = _model.clone();
     factory.connect_bind(move |_, list_item| {
+        // Get Entry object
         let entry = list_item.child().unwrap().downcast::<gtk::Entry>().unwrap();
         if let Some(item) = list_item.item().and_downcast::<VideoSegment>() {
+            let row_index = model_clone.find(&item).unwrap();
             match item.get_segment(index) {
                 Some(data) => {
+                    // Gets the formatted clocktime of the specified field for the column
                     let text = match field {
                         SegmentField::Time => {
                             data.time.map_or("none".to_string(), |t| format_clock(ClockTime::from_nseconds(t)))
@@ -260,101 +255,93 @@ fn add_column(column_view: &gtk::ColumnView, _model: &ListStore, title: &str, in
                             data.duration.map_or("none".to_string(), |d| format_clock(ClockTime::from_nseconds(d)))
                         }
                     };
+                    // Updates the entry object text to display the time
                     entry.set_text(text.as_str());
+                    let t = text.as_str();
+                    println!("Set {t} to column {index}, row {row_index}");
+                    // Stores the time as the last valid time to be used to rollback to if invalid time is manually entered by user
                     store_data(&entry, "data", text);
 
                     let focus_control = EventControllerFocus::new();
                     
-                    let entry_clone = entry.clone();
+                    // Signal for user to submit (Pressing Enter) manual edits to a cell in split table
                     entry.connect_activate(glib::clone!(
                         #[weak(rename_to = seg)] item,
                         #[strong] field,
-                        #[weak(rename_to = entry)] entry_clone,
+                        #[weak(rename_to = entry)] entry,
                         move |_| {
-                            let input = entry.text().to_string();
-                            let pattern = r"^[0-5][0-9]:[0-5][0-9]\.\d{3}$";
-                            let re = Regex::match_simple(pattern, input.clone(), RegexCompileFlags::empty(), RegexMatchFlags::empty());
-                            if !re {
-                                println!("Entry is not in valid format");
-                                let previous_text = unsafe { get_data::<String>(&entry, "data").unwrap().as_ref() };
-                                entry.set_text(previous_text.as_str());
-                                return;
-                            }
-                            let mut text = input.clone();
-                            let minutes: String = text.drain(..text.find(":").unwrap()).collect();
-                            text.remove(0);
-                            let seconds: String = text.drain(..text.find(".").unwrap()).collect();
-                            text.remove(0);
-                            let subsecond: String = text;
-                            let time = clocktime_from_parts(minutes, seconds, subsecond).unwrap().nseconds();
-                            match field {
-                                SegmentField::Time => {
-                                    seg.set_time(index, time);
-                                },
-                                SegmentField::Duration => {
-                                    seg.set_duration(index, time);
-                                }
-                            }
-                            println!("Stored value {input} to entry");
-                            store_data(&entry, "data", input);
+                            // Validates the formatting of the user inputted time and updates the segment data and entry information
+                            validate_and_apply(&entry, &field, &seg, index);
                         }
                     ));
                     
-                    let entry_clone = entry.clone();
+                    // Signal for when user manually edits a cell in split table and leaves focus
+                    // Same as if the user submitted the edit
                     focus_control.connect_leave(glib::clone!(
                         #[weak(rename_to = seg)] item,
                         #[strong] field,
-                        #[weak(rename_to = entry)] entry_clone,
+                        #[weak(rename_to = entry)] entry,
                         move |_| {
-                            let input = entry.text().to_string();
-                            let pattern = r"^[0-5][0-9]:[0-5][0-9]\.\d{3}$";
-                            let re = Regex::match_simple(pattern, input.clone(), RegexCompileFlags::empty(), RegexMatchFlags::empty());
-                            if !re {
-                                println!("Entry is not in valid format");
-                                let previous_text = unsafe { get_data::<String>(&entry, "data").unwrap().as_ref() };
-                                entry.set_text(previous_text.as_str());
-                                return;
-                            }
-                            let mut text = input.clone();
-                            let minutes: String = text.drain(..text.find(":").unwrap()).collect();
-                            text.remove(0);
-                            let seconds: String = text.drain(..text.find(".").unwrap()).collect();
-                            text.remove(0);
-                            let subsecond: String = text;
-                            let time = clocktime_from_parts(minutes, seconds, subsecond).unwrap().nseconds();
-                            match field {
-                                SegmentField::Time => {
-                                    seg.set_time(index, time);
-                                },
-                                SegmentField::Duration => {
-                                    seg.set_duration(index, time);
-                                }
-                            }
-                            println!("Stored value {input} to entry");
-                            store_data(&entry, "data", input);
+                            // Validates the formatting of the user inputted time and updates the segment data and entry information
+                            validate_and_apply(&entry, &field, &seg, index);
                         }
                     ));
                     
+                    // Adds the focus controller to the entry object
                     entry.add_controller(focus_control);
                 } 
                 None => entry.set_text("Empty"),
             };
         }
     });
-    
+
     let column = gtk::ColumnViewColumn::new(Some(title), Some(factory));
     column_view.append_column(&column);
 }
 
+// Validates the formatting of the user inputted time and updates the segment data and entry information
+// Index: video player id NOT the column index 
+// Field: Time or Duration
+// Each video player gets two columns one for time and one for duration
+fn validate_and_apply(entry: &Entry, field: &SegmentField, seg: &VideoSegment, index: usize) {
+    let input = entry.text().to_string();
+    let pattern = r"^[0-5][0-9]:[0-5][0-9]\.\d{3}$";
+    // Checks if the input matches the format: MM:SS.sss
+    let re = Regex::match_simple(pattern, input.clone(), RegexCompileFlags::empty(), RegexMatchFlags::empty());
+    if !re {
+        println!("Entry is not in valid format");
+        // Gets previously saved valid data to reset the users changes
+        let previous_text = unsafe { get_data::<String>(entry, "data").unwrap().as_ref() };
+        entry.set_text(previous_text.as_str());
+        return;
+    }
+
+    // Converts user input to nano seconds and updates segment data
+    let time = string_to_nseconds(&input).unwrap();
+    match field {
+        SegmentField::Time => {
+            seg.set_time(index, time);
+        },
+        SegmentField::Duration => {
+            seg.set_duration(index, time);
+        }
+    }
+    println!("Stored value {input} to entry");
+    // Updates entry data to store the new rollback time if invalid time is manually entered by user
+    store_data(entry, "data", input);
+}
+
+// Adds column for segment names
 fn add_name_column(column_view: &gtk::ColumnView, title: &str) {
     let factory = gtk::SignalListItemFactory::new();
     
+    // Creates the entry objects
     factory.connect_setup(|_factory, list_item: &ListItem| {
         let entry = Entry::new();
-        
         list_item.set_child(Some(&entry));
     });
     
+    // Binds the stored data to the displayed entry objects
     factory.connect_bind(|_factory, list_item: &ListItem| {
         let entry = list_item.child().unwrap().downcast::<Entry>().expect("The child is not an Entry");
         let item = list_item.item();
@@ -362,6 +349,7 @@ fn add_name_column(column_view: &gtk::ColumnView, title: &str) {
         let current_name = video_segment.get_name();
         entry.set_text(&current_name);
         
+        // Updates segment name from user input
         entry.connect_changed(glib::clone!(
             #[weak(rename_to = seg)] video_segment,
             move |entry| {
@@ -371,6 +359,7 @@ fn add_name_column(column_view: &gtk::ColumnView, title: &str) {
         ));
     });
     
+    // Adds the new column to column view
     let new_column = gtk::ColumnViewColumn::new(Some(title), Some(factory));
     column_view.append_column(&new_column);
     
@@ -385,6 +374,7 @@ fn remove_column(column_view: &gtk::ColumnView) {
     }
 }
 
+// Adds empty row to column view
 fn add_empty_row(column_view: &ColumnView, model: &ListStore) {
     let column_count = column_view.columns().n_items() - 1;
     let row_count = model.n_items() as usize;
@@ -393,18 +383,6 @@ fn add_empty_row(column_view: &ColumnView, model: &ListStore) {
     
     for _ in 0..column_count {
         seg.add_empty_segment();
-    }
-    model.append(&seg);
-}
-
-fn add_row(column_view: &ColumnView, model: &ListStore, time: u64, duration: u64) {
-    let column_count = column_view.columns().n_items() - 1;
-    let row_count = model.n_items() as usize;
-    let name = row_count;
-    let seg = VideoSegment::new(name.to_string().as_str());
-    
-    for _ in 0..column_count {
-        seg.add_segment(time, duration);
     }
     model.append(&seg);
 }
@@ -422,12 +400,14 @@ fn remove_row(model: &gio::ListStore, row_index: u32) {
     model.remove(row_index);
 }
 
+// Applys data to a widget given a key and value pair
 fn store_data<T: 'static>(widget: &impl ObjectExt, key: &str, value: T) {
     unsafe {
         widget.set_data(key, value);
     }
 }
 
+// Retrieves data from a widget given a key
 fn get_data<T: 'static>(widget: &impl ObjectExt, key: &str) -> Option<std::ptr::NonNull<T>> {
     unsafe { widget.data::<T>(key) }
 }
@@ -457,6 +437,7 @@ fn main() -> glib::ExitCode {
             let builder = build_ui(app);
 
             let builder_clone = builder.clone();
+            // ensures all video player are properly disposed 
             app.connect_shutdown(move |_| {
                 println!("shutting down");
                 let video_container: FlowBox = builder_clone.object("video_container").expect("failed to get video_container from UI file");
@@ -470,8 +451,6 @@ fn main() -> glib::ExitCode {
             });
 
         });
-
-
         let res = app.run();
 
         unsafe {

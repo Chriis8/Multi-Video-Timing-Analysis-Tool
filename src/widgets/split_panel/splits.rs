@@ -33,6 +33,9 @@ glib::wrapper! {
     @implements gtk::Buildable;
 }
 
+// Video Segment:
+// Name: Name of the segment
+// Segment: time and duration of the split
 impl VideoSegment {
     pub fn new(name: &str) -> Self {
         let segment: Self = glib::Object::new::<Self>();

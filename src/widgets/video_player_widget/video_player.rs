@@ -98,7 +98,6 @@ mod imp {
 
             let adjustment = gtk::Adjustment::new(0.0, 0.0, 100.0, 1.0, 0.0, 0.0);
             self.seek_bar.set_adjustment(&adjustment);
-            //self.seek_bar.add_mark(10.0, gtk::PositionType::Right, None);
         }
     }
     
@@ -121,6 +120,7 @@ mod imp {
         }
 
         fn signals() -> &'static [Signal] {
+            // Setup split button signal
             static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
                 vec![Signal::builder("button-clicked")
                     .flags(glib::SignalFlags::RUN_LAST)
@@ -141,7 +141,10 @@ glib::wrapper! {
     @implements gtk::Buildable;
 }
 
+// Video Player:
+// Custom widget that includes the open file navigation, main video, media control, split button
 impl VideoPlayer {
+    // Creates new video player widget
     pub fn new(id: u32) -> Self {
         let widget: Self = glib::Object::new::<Self>();
         
@@ -158,6 +161,7 @@ impl VideoPlayer {
         widget
     }
 
+    // Controls automatic seek bar movement while video is playing
     fn start_updating_scale(&self, scale: &gtk::Scale) {
         println!("Starting to update the seek bar");
         let imp = imp::VideoPlayer::from_obj(self);
@@ -166,20 +170,22 @@ impl VideoPlayer {
         let is_dragging_clone = imp.is_dragging.clone();
         *imp.continue_timeout.borrow_mut() = true;
         let to_continue = imp.continue_timeout.clone();
+        // Sets up timeout to update the seekbar every 500 milliseconds
         let source_id = timeout_add_local(Duration::from_millis(500), move || {
             if !*to_continue.borrow() {
                 println!("breaking update scale timeout");
                 return glib::ControlFlow::Break
             }
+            // Skips update if user is moving the seek bar
             if is_dragging_clone.get() {
                 println!("Dragging, skipping update scale");
                 return glib::ControlFlow::Continue
             }
+            // Updates the seek bar based on the videos position
             if let Some(gstman) = gstman_weak.upgrade() {
                 if let Ok(mut guard) = gstman.lock() {
                     if let Some(ref mut pipeline) = *guard {
                         if let Ok(new_value) = pipeline.position_to_percent() {
-                            //println!("New Value: {new_value}");
                             seek_bar_clone.set_value(new_value);
                         } else {
                             eprintln!("Pipeline not ready");
@@ -192,21 +198,26 @@ impl VideoPlayer {
         *imp.timeout_id.borrow_mut() = Some(source_id);
     }
 
+    // Updates video position from seek bar position
     fn update_scale_value(&self) {
         let imp = imp::VideoPlayer::from_obj(self);
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
         if let Some(gstman) = gstman_weak.upgrade() {
             if let Ok(mut guard) = gstman.lock() {
                 if let Some(ref mut pipeline) = *guard {
+                    // gets seek bar progress 0.0 - 1.0
                     let percent = imp.seek_bar.value() / 100.0;
+                    // Gets precentage time in nanoseconds of the total videos duration
                     let position = pipeline.percent_to_position(percent).expect("Failed to get position");
                     println!("Position: {position}");
+                    // Updates the video players position from acquired position
                     pipeline.seek_position(gstreamer::ClockTime::from_nseconds(position)).expect("Failed to seek position");
                 }
             }
         }
     }
 
+    // Connects user control
     fn connect_scale_drag_signals(&self, scale_box: &gtk::Box) {
 
         let imp = imp::VideoPlayer::from_obj(self);
@@ -255,6 +266,7 @@ impl VideoPlayer {
 
         println!("Setting up buttons");
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        // File Chooser / Open file button
         imp.fchooser.connect_clicked(glib::clone!(
             #[strong] gstman_weak,
             #[weak(rename_to = text)] imp.text_view,
@@ -278,8 +290,6 @@ impl VideoPlayer {
                 dialog.add_button("Accept", gtk::ResponseType::Accept);
                 if let Some(window) = win.downcast::<gtk::ApplicationWindow>().ok() {
                     dialog.set_transient_for(Some(&window));
-                } else {
-                    eprintln!("OOOOOOOF");
                 }
 
                 let gstman_weak_clone = gstman_weak.clone();
@@ -319,6 +329,7 @@ impl VideoPlayer {
         ));
 
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        // Moves video one frame backward
         imp.previous_frame_button.connect_clicked(glib::clone!(
             #[strong] gstman_weak,
             move |_| {
@@ -337,6 +348,7 @@ impl VideoPlayer {
         ));
         
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        // Set video to playing state
         imp.play_button.connect_clicked(glib::clone!(
             #[strong] gstman_weak,
             move |_| {
@@ -356,6 +368,7 @@ impl VideoPlayer {
         ));
         
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        // Closes video file
         imp.stop_button.connect_clicked(glib::clone!(
             #[strong] gstman_weak,
             #[weak(rename_to = timeout_id)] imp.timeout_id,
@@ -378,6 +391,7 @@ impl VideoPlayer {
         ));
         
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        // Moves video one frame forward
         imp.next_frame_button.connect_clicked(glib::clone!(
             #[strong] gstman_weak,
             move |_| {
@@ -396,6 +410,7 @@ impl VideoPlayer {
         ));
         
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        // Test button: currently used to for splitting segments
         imp.test_button.connect_clicked(glib::clone!(
             #[weak(rename_to = this)] self,
             #[strong] gstman_weak,
@@ -421,19 +436,19 @@ impl VideoPlayer {
             }
         ));
 
-        //let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
-        //Self::connect_scale_signals(&imp.seek_bar, gstman_weak);
         Self::connect_scale_drag_signals(self,&imp.scale_parent);
         Self::load_css();
     }
 
-    pub fn split_button(&self) -> gtk::Button {
-        let imp = imp::VideoPlayer::from_obj(self);
-        imp.split_button.clone()
-    }
+    // // Gets split button - idk if this is used
+    // pub fn split_button(&self) -> gtk::Button {
+    //     let imp = imp::VideoPlayer::from_obj(self);
+    //     imp.split_button.clone()
+    // }
 
-    pub fn pipeline(&self) -> Weak<Mutex<Option<VideoPipeline>>> {
-        let imp = imp::VideoPlayer::from_obj(self);
-        Arc::downgrade(&imp.gstreamer_manager)
-    }
+    // // Gets the video players pipeline
+    // pub fn pipeline(&self) -> Weak<Mutex<Option<VideoPipeline>>> {
+    //     let imp = imp::VideoPlayer::from_obj(self);
+    //     Arc::downgrade(&imp.gstreamer_manager)
+    // }
 }

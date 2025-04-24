@@ -106,7 +106,13 @@ fn build_ui(app: &Application) -> Builder {
             }
             // Updates cell information at row: update_row and column: id with the new position and duration
             let segment = model_clone_clone.item(update_row).and_downcast::<VideoSegment>().unwrap();
-            segment.set_segment(id as usize, position, position);
+            if update_row == 0 {
+                segment.set_segment(id as usize, position, position);
+            } else {
+                let previous_segment = model_clone_clone.item(update_row - 1).and_downcast::<VideoSegment>().unwrap().get_segment(id as usize).unwrap();
+                let previous_time = previous_segment.time.unwrap();
+                segment.set_segment(id as usize, position, position - previous_time);
+            }
             // Updates the table dislay
             model_clone_clone.remove(update_row);
             model_clone_clone.insert(update_row, &segment);
@@ -266,24 +272,45 @@ fn add_column(column_view: &gtk::ColumnView, _model: &ListStore, title: &str, in
                     
                     // Signal for user to submit (Pressing Enter) manual edits to a cell in split table
                     entry.connect_activate(glib::clone!(
-                        #[weak(rename_to = seg)] item,
                         #[strong] field,
                         #[weak(rename_to = entry)] entry,
+                        #[weak(rename_to = model)] model_clone,
                         move |_| {
                             // Validates the formatting of the user inputted time and updates the segment data and entry information
-                            validate_and_apply(&entry, &field, &seg, index);
+                            //validate_and_apply(&entry, &field, &seg, index);
+                            let changed = has_changed(&entry);
+                            if !changed {
+                                println!("Nothing changed");
+                                return;
+                            } else {
+                                println!("Changed continue to updates");
+                            }
+                            let successful_update = update_split_with_propagation(&model, &field, index, row_index, &entry);
+                            if !successful_update {
+                                eprintln!("Did not propogate changes");
+                            }
                         }
                     ));
                     
                     // Signal for when user manually edits a cell in split table and leaves focus
                     // Same as if the user submitted the edit
                     focus_control.connect_leave(glib::clone!(
-                        #[weak(rename_to = seg)] item,
                         #[strong] field,
                         #[weak(rename_to = entry)] entry,
+                        #[weak(rename_to = model)] model_clone,
                         move |_| {
                             // Validates the formatting of the user inputted time and updates the segment data and entry information
-                            validate_and_apply(&entry, &field, &seg, index);
+                            let changed = has_changed(&entry);
+                            if !changed {
+                                println!("Nothing changed");
+                                return;
+                            } else {
+                                println!("Changed continue to updates");
+                            }
+                            let successful_update = update_split_with_propagation(&model, &field, index, row_index, &entry);
+                            if !successful_update {
+                                eprintln!("Did not propogate changes");
+                            }
                         }
                     ));
                     
@@ -303,32 +330,125 @@ fn add_column(column_view: &gtk::ColumnView, _model: &ListStore, title: &str, in
 // Index: video player id NOT the column index 
 // Field: Time or Duration
 // Each video player gets two columns one for time and one for duration
-fn validate_and_apply(entry: &Entry, field: &SegmentField, seg: &VideoSegment, index: usize) {
+// fn validate_and_apply(entry: &Entry, field: &SegmentField, seg: &VideoSegment, index: usize) {
+//     let input = entry.text().to_string();
+//     let pattern = r"^[0-5][0-9]:[0-5][0-9]\.\d{3}$";
+//     // Checks if the input matches the format: MM:SS.sss
+//     let re = Regex::match_simple(pattern, input.clone(), RegexCompileFlags::empty(), RegexMatchFlags::empty());
+//     if !re {
+//         println!("Entry is not in valid format");
+//         // Gets previously saved valid data to reset the users changes
+//         let previous_text = unsafe { get_data::<String>(entry, "data").unwrap().as_ref() };
+//         entry.set_text(previous_text.as_str());
+//         return;
+//     }
+
+//     // Converts user input to nano seconds and updates segment data
+//     let time = string_to_nseconds(&input).unwrap();
+//     match field {
+//         SegmentField::Time => {
+//             seg.set_time(index, time);
+//         },
+//         SegmentField::Duration => {
+//             seg.set_duration(index, time);
+//         }
+//     }
+//     println!("Stored value {input} to entry");
+//     // Updates entry data to store the new rollback time if invalid time is manually entered by user
+//     store_data(entry, "data", input);
+// }
+
+// Validates the formatting of user input into the split table
+fn validate_split_table_entries(entry: &Entry) -> bool {
     let input = entry.text().to_string();
     let pattern = r"^[0-5][0-9]:[0-5][0-9]\.\d{3}$";
     // Checks if the input matches the format: MM:SS.sss
     let re = Regex::match_simple(pattern, input.clone(), RegexCompileFlags::empty(), RegexMatchFlags::empty());
     if !re {
         println!("Entry is not in valid format");
-        // Gets previously saved valid data to reset the users changes
+        // Resets displayed data to last valid entry
         let previous_text = unsafe { get_data::<String>(entry, "data").unwrap().as_ref() };
         entry.set_text(previous_text.as_str());
-        return;
+    }
+    re
+}
+
+fn update_split_with_propagation(model: &ListStore, field: &SegmentField, index: usize, row_index: u32, entry: &Entry) -> bool {
+    // Checks inputted formatting
+    let propogate = validate_split_table_entries(&entry);
+
+    // Return early if input is in invalid format
+    if !propogate {
+        return propogate;
     }
 
-    // Converts user input to nano seconds and updates segment data
+    // Updates the segment with user input first
+    let input = entry.text().to_string();
     let time = string_to_nseconds(&input).unwrap();
+    let current_segment = model.item(row_index).unwrap().downcast::<VideoSegment>().unwrap();
     match field {
         SegmentField::Time => {
-            seg.set_time(index, time);
-        },
+            current_segment.set_time(index, time);
+        }
         SegmentField::Duration => {
-            seg.set_duration(index, time);
+            current_segment.set_duration(index, time);
         }
     }
-    println!("Stored value {input} to entry");
-    // Updates entry data to store the new rollback time if invalid time is manually entered by user
-    store_data(entry, "data", input);
+
+    // Propogates the changes down the table
+    let total_items = model.n_items();
+    match field {
+        SegmentField::Time => {
+            // Clamp the times and update durations to correctly match the new times (Can change both time and durations)
+            for i in row_index..total_items {
+                let mut previous_time: u64 = 0;
+                if i > 0 {
+                    let previous_segment: VideoSegment = model.item(i - 1).unwrap().downcast::<VideoSegment>().unwrap();
+                    let previous_item = previous_segment.get_segment(index).unwrap();
+                    previous_time = previous_item.time.unwrap();
+                }
+                let current_segment: VideoSegment = model.item(i).unwrap().downcast::<VideoSegment>().unwrap();
+                let current_item = current_segment.get_segment(index).unwrap();
+                let current_time = current_item.time.unwrap();
+                let current_duration = current_item.duration.unwrap();
+                let new_time = std::cmp::max(current_time, previous_time);
+                let new_duration = new_time - previous_time;
+                if current_duration == new_duration {
+                    break;
+                }
+                current_segment.set_segment(index, new_time, new_duration);
+                model.remove(i);
+                model.insert(i, &current_segment);
+            }
+            true
+        }
+        SegmentField::Duration => {
+            // Update corresponding time then update all following times to match the durations (Only changes the times)
+            for i in row_index..total_items {
+                let mut previous_time: u64 = 0;
+                if i > 0 {
+                    let previous_segment: VideoSegment = model.item(i - 1).unwrap().downcast::<VideoSegment>().unwrap();
+                    let previous_item = previous_segment.get_segment(index).unwrap();
+                    previous_time = previous_item.time.unwrap();
+                }
+                let current_segment: VideoSegment = model.item(i).unwrap().downcast::<VideoSegment>().unwrap();
+                let current_item = current_segment.get_segment(index).unwrap();
+                let current_duration = current_item.duration.unwrap();
+                let new_time = previous_time + current_duration;
+                current_segment.set_segment(index, new_time, current_duration);
+                model.remove(row_index);
+                model.insert(row_index, &current_segment);
+            }
+            true
+        }
+    }
+}
+
+// Checks to see if the entry has changes
+fn has_changed(entry: &Entry) -> bool {
+    let text = entry.text().to_string();
+    let previous_text = unsafe { get_data::<String>(entry, "data").unwrap().as_ref() };
+    return text != *previous_text;
 }
 
 // Adds column for segment names

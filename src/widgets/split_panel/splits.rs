@@ -69,11 +69,11 @@ impl VideoSegment {
         imp.name.replace(new_name);
     }
 
-    pub fn add_segment(&self, time: u64, duration: u64) {
+    pub fn add_segment(&self, time: Option<u64>, duration: Option<u64>) {
         let imp = imp::VideoSegment::from_obj(self);
         let new_segment = Segment {
-            time: Some(time),
-            duration: Some(duration),
+            time: time,
+            duration: duration,
         };
         imp.segments.borrow_mut().push(new_segment);
     }
@@ -103,6 +103,6 @@ impl VideoSegment {
     pub fn set_duration(&self, index: usize, duration: u64) {
         let imp = imp::VideoSegment::from_obj(self);
         let seg = &mut imp.segments.borrow_mut()[index];
-        seg.time = Some(duration);
+        seg.duration = Some(duration);
     }
 }

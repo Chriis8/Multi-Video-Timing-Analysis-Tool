@@ -45,19 +45,19 @@
                             </object>
                         </child> -->
 
-                        <!-- <child>
+                        <child>
                             <object class="GtkButton" id="add_row_button">
                                 <property name="label">Add Row</property>
                             </object>
                         </child>
                         
-                        <child>
+                        <!-- <child>
                             <object class="GtkButton" id="remove_column_button">
                                 <property name="label">Remove Column</property>
                             </object>
-                        </child>
+                        </child> -->
                         
-                        <child>
+                        <!-- <child>
                             <object class="GtkButton" id="remove_row_button">
                                 <property name="label">Remove </property>
                             </object>

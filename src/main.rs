@@ -1,8 +1,9 @@
 mod video_pipeline;
 use gio::ListStore;
+use glib::property::PropertyGet;
 use glib::{random_int_range, ExitCode, prelude::ObjectExt, Regex, RegexCompileFlags, RegexMatchFlags};
 use gstreamer::ClockTime;
-use gtk::{ColumnViewColumn, EventControllerFocus, FlowBox, FlowBoxChild, ListItem, SelectionMode};
+use gtk::{ColumnViewColumn, EventControllerFocus, FlowBox, FlowBoxChild, ListItem, SelectionMode, SingleSelection};
 use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button, ColumnView, CssProvider, Entry, Label};
 use gstgtk4;
 mod widgets;
@@ -41,15 +42,17 @@ fn build_ui(app: &Application) -> Builder {
     let window: ApplicationWindow = builder.object("main_window").expect("Failed to get main_window from UI file");
     let column_view_container: Box = builder.object("split_container").expect("Failed to column_view_container from UI File");
     let video_container: FlowBox = builder.object("video_container").expect("Failed to get video_container from UI File");
+    let add_row_button: Button = builder.object("add_row_button").expect("Failed to get add_row_button from UI File");
 
+    
     video_container.set_homogeneous(true);
     video_container.set_valign(gtk::Align::Fill);
     video_container.set_selection_mode(SelectionMode::None);
     video_container.set_column_spacing(0);
-
+    
     let (model, column_view) = create_column_view();
     column_view_container.append(&column_view);
-
+    
     // Adds first row of segment names to the split table
     let column_view_clone = column_view.clone();
     add_name_column(&column_view_clone, "Segment Name");
@@ -57,6 +60,12 @@ fn build_ui(app: &Application) -> Builder {
     // Add data to video_container to keep track of the number of active videos
     let initial_child_count = 0_usize;
     store_data(&video_container, "count", initial_child_count);
+    
+    let column_view_clone = column_view.clone();
+    let model_clone = model.clone();
+    add_row_button.connect_clicked(move |_| {
+        add_empty_row(&column_view_clone, &model_clone);
+    });
 
     let button: Button = builder.object("new_video_player_button").expect("Failed to get button");
     let builder_clone = builder.clone();
@@ -80,57 +89,77 @@ fn build_ui(app: &Application) -> Builder {
         new_player.connect_local("button-clicked", false, move |args| {
             let id: u32 = args[1].get().unwrap();
             let position: u64 = args[2].get().unwrap();
-            let row_count = model_clone_clone.n_items();
-            
-            // Finds the appropriate index in the list of rows to add the new split
-            let times = get_segment_times(&model_clone_clone, id as usize);
-            let insert_row_index = get_new_split_index(times, position) as u32;
 
-            // Checks to see if the found index is an empty cell
-            let segment_opt = model_clone_clone.item(insert_row_index).and_downcast::<VideoSegment>();
-            match segment_opt {
-                // Found insert index is some where in the middle so we see where we should add the information
-                Some(seg) => {
-                    let segment_time = seg.get_segment(id as usize).unwrap().time;
-                    match segment_time {
-                        // If a time in row already there exists then we make a new empty row
-                        Some(_) => {
-                            insert_empty_row(&column_view_clone_clone, &model_clone_clone, insert_row_index);
-                        }
-                        // If a time doesn't exist we can fill the empty cell with the information
-                        None => { }
-                    }
-
+            let selection_model = column_view_clone_clone.model().and_downcast::<SingleSelection>().unwrap();
+            if let Some(selected_segment) = selection_model.selected_item().and_downcast::<VideoSegment>() {
+                let selected_index = selection_model.selected();
+                if let Some(previous_time) = get_previous_time(&model_clone_clone, selected_index, id) {
+                    selected_segment.set_segment(id as usize, position, position - previous_time);
+                } else {
+                    selected_segment.set_segment(id as usize, position, position);
                 }
-                // Found insert index is at the end so we add an empty row
-                None => {
-                    add_empty_row(&column_view_clone_clone, &model_clone_clone);
-                }
-            }
-            let new_segment = model_clone_clone.item(insert_row_index).and_downcast::<VideoSegment>().unwrap();
-            // If it's the first row duration is equal to the splits time
-            if insert_row_index == 0 {
-                new_segment.set_segment(id as usize, position, position);
+                model_clone_clone.remove(selected_index);
+                model_clone_clone.insert(selected_index, &selected_segment);
             } else {
-                // THIS WILL NEED TO BE CHANGED to find the last time, previous to the new segment that exists, and set the duration accordingly
-                let previous_segment = model_clone_clone.item(insert_row_index - 1).and_downcast::<VideoSegment>().unwrap().get_segment(id as usize).unwrap();
-                let previous_time = previous_segment.time.unwrap_or_else(|| 0);
-                new_segment.set_segment(id as usize, position, position - previous_time);
-            }
-            
-            // Updates duration and display of next segment if new split is added before another
-            if let Some(next_segment) = model_clone_clone.item(insert_row_index + 1).and_downcast::<VideoSegment>() {
-                let split = next_segment.get_segment(id as usize).unwrap();
-                if let (Some(time), Some(_)) = (split.time, split.duration) {
-                    next_segment.set_duration(id as usize, time - position);
-                    model_clone_clone.remove(insert_row_index + 1);
-                    model_clone_clone.insert(insert_row_index + 1, &next_segment);
-                }
+                eprintln!("No segment selected");
             }
 
-            // Updates the information in the newly inserted row
-            model_clone_clone.remove(insert_row_index);
-            model_clone_clone.insert(insert_row_index, &new_segment);
+            update_durations(&model_clone_clone, id);
+            
+            {
+
+                // let row_count = model_clone_clone.n_items();
+                
+                // // Finds the appropriate index in the list of rows to add the new split
+                // let times = get_segment_times(&model_clone_clone, id as usize);
+                // let insert_row_index = get_new_split_index(times, position) as u32;
+    
+                // // Checks to see if the found index is an empty cell
+                // let segment_opt = model_clone_clone.item(insert_row_index).and_downcast::<VideoSegment>();
+                // match segment_opt {
+                //     // Found insert index is some where in the middle so we see where we should add the information
+                //     Some(seg) => {
+                //         let segment_time = seg.get_segment(id as usize).unwrap().time;
+                //         match segment_time {
+                //             // If a time in row already there exists then we make a new empty row
+                //             Some(_) => {
+                //                 insert_empty_row(&column_view_clone_clone, &model_clone_clone, insert_row_index);
+                //             }
+                //             // If a time doesn't exist we can fill the empty cell with the information
+                //             None => { }
+                //         }
+    
+                //     }
+                //     // Found insert index is at the end so we add an empty row
+                //     None => {
+                //         add_empty_row(&column_view_clone_clone, &model_clone_clone);
+                //     }
+                // }
+                // let new_segment = model_clone_clone.item(insert_row_index).and_downcast::<VideoSegment>().unwrap();
+                // // If it's the first row duration is equal to the splits time
+                // if insert_row_index == 0 {
+                //     new_segment.set_segment(id as usize, position, position);
+                // } else {
+                //     // THIS WILL NEED TO BE CHANGED to find the last time, previous to the new segment that exists, and set the duration accordingly
+                //     let previous_segment = model_clone_clone.item(insert_row_index - 1).and_downcast::<VideoSegment>().unwrap().get_segment(id as usize).unwrap();
+                //     let previous_time = previous_segment.time.unwrap_or_else(|| 0);
+                //     new_segment.set_segment(id as usize, position, position - previous_time);
+                // }
+                
+                // // Updates duration and display of next segment if new split is added before another
+                // if let Some(next_segment) = model_clone_clone.item(insert_row_index + 1).and_downcast::<VideoSegment>() {
+                //     let split = next_segment.get_segment(id as usize).unwrap();
+                //     if let (Some(time), Some(_)) = (split.time, split.duration) {
+                //         next_segment.set_duration(id as usize, time - position);
+                //         model_clone_clone.remove(insert_row_index + 1);
+                //         model_clone_clone.insert(insert_row_index + 1, &next_segment);
+                //     }
+                // }
+    
+                // // Updates the information in the newly inserted row
+                // model_clone_clone.remove(insert_row_index);
+                // model_clone_clone.insert(insert_row_index, &new_segment);
+            };
 
             None
         });
@@ -169,6 +198,33 @@ fn build_ui(app: &Application) -> Builder {
     app.add_window(&window);
     window.show();
     builder
+}
+
+// Updates durations to correctly match the set segment times
+fn update_durations(model: &ListStore, video_index: u32) {
+    let row_count = model.n_items();
+    let mut previous_time: u64 = 0;
+    for i in 0..row_count {
+        let current_video_segment = model.item(i).and_downcast::<VideoSegment>().unwrap();
+        let current_segment = current_video_segment.get_segment(video_index as usize).unwrap();
+        if let (Some(time), Some(duration)) = (current_segment.time, current_segment.duration) {
+            current_video_segment.set_duration(video_index as usize, time - previous_time);
+            previous_time = time;
+            model.remove(i);
+            model.insert(i, &current_video_segment);
+        }
+    }
+}
+
+// Gets most recent previous time
+fn get_previous_time(model: &ListStore, row_index: u32, video_index: u32) -> Option<u64> {
+    for i in (0..row_index).rev() {
+        let item = model.item(i).and_downcast::<VideoSegment>().unwrap();
+        if let Some(time) = item.get_segment(video_index as usize).unwrap().time {
+            return Some(time);
+        }
+    }
+    return None;
 }
 
 // Gets all split time for indexed video
@@ -634,4 +690,3 @@ fn main() -> glib::ExitCode {
     ExitCode::SUCCESS
 }
 
-// Broken when adding another video and splitting. Getting error on line 181

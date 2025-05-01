@@ -72,12 +72,12 @@ mod imp {
                 "name" => self.name.borrow().to_value(),
                 n if n.starts_with("time-") => {
                     let i = n["time-".len()..].parse::<usize>().unwrap();
-                    let val = self.segments.borrow().get(i).and_then(|v| v.time).unwrap_or(0);
+                    let val = self.segments.borrow().get(i).and_then(|v| v.time).unwrap_or(u64::MAX);
                     val.to_value()
                 }
                 n if n.starts_with("duration-") => {
                     let i = n["duration-".len()..].parse::<usize>().unwrap();
-                    let val = self.segments.borrow().get(i).and_then(|v| v.duration).unwrap_or(0);
+                    let val = self.segments.borrow().get(i).and_then(|v| v.duration).unwrap_or(u64::MAX);
                     val.to_value()
                 }
                 _ => unimplemented!()

@@ -46,8 +46,14 @@
                         </child> -->
 
                         <child>
-                            <object class="GtkButton" id="add_row_button">
-                                <property name="label">Add Row</property>
+                            <object class="GtkButton" id="add_row_above_button">
+                                <property name="label">Add Row Above</property>
+                            </object>
+                        </child>
+
+                        <child>
+                            <object class="GtkButton" id="add_row_below_button">
+                                <property name="label">Add Row Below</property>
                             </object>
                         </child>
                         

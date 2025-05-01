@@ -85,6 +85,7 @@ mod imp {
         }
 
         fn set_property(&self, _id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
+            println!("Set property id: {_id}, value: {value:?}, pspec: {pspec:?}");
             match pspec.name() {
                 "name" => {
                     let val = value.get::<String>().unwrap();
@@ -96,7 +97,7 @@ mod imp {
                     let segments = &mut self.segments.borrow_mut();
                     if i < segments.len() {
                         let raw = value.get::<u64>().unwrap_or_default();
-                        segments[i].time = if raw == 0 { None } else { Some(raw) };
+                        segments[i].time = Some(raw);
                         self.notify(pspec);
                     }
                 }
@@ -105,7 +106,7 @@ mod imp {
                     let segments = &mut self.segments.borrow_mut();
                     if i < segments.len() {
                         let raw = value.get::<u64>().unwrap_or_default();
-                        segments[i].duration = if raw == 0 { None } else { Some(raw) };
+                        segments[i].duration = Some(raw);
                         self.notify(pspec);
                     }
                 }
@@ -162,6 +163,7 @@ impl VideoSegment {
     }
 
     pub fn set_time(&self, video_player_index: usize, time: u64) {
+        println!("Setting times to {time}");
         self.set_property(&format!("time-{}", video_player_index), time);
     }
 

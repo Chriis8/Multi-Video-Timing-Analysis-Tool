@@ -44,7 +44,8 @@ fn build_ui(app: &Application) -> Builder {
     let window: ApplicationWindow = builder.object("main_window").expect("Failed to get main_window from UI file");
     let column_view_container: Box = builder.object("split_container").expect("Failed to column_view_container from UI File");
     let video_container: FlowBox = builder.object("video_container").expect("Failed to get video_container from UI File");
-    let add_row_button: Button = builder.object("add_row_button").expect("Failed to get add_row_button from UI File");
+    let add_row_above_button: Button = builder.object("add_row_above_button").expect("Failed to get add_row_above_button from UI File");
+    let add_row_below_button: Button = builder.object("add_row_below_button").expect("Failed to get add_row_below_button from UI File");
 
     
     video_container.set_homogeneous(true);
@@ -58,14 +59,32 @@ fn build_ui(app: &Application) -> Builder {
     // Adds first row of segment names to the split table
     let column_view_clone = column_view.clone();
     add_name_column(&column_view_clone, "Segment Name");
+
+    // Adds an initial row
+    add_empty_row_with_columns(&model, MAX_VIDEO_PLAYERS);
     
     // Add data to video_container to keep track of the number of active videos
     let initial_child_count = 0_usize;
     store_data(&video_container, "count", initial_child_count);
     
     let model_clone = model.clone();
-    add_row_button.connect_clicked(move |_| {
-        add_empty_row_with_columns(&model_clone, MAX_VIDEO_PLAYERS);
+    let column_view_clone = column_view.clone();
+    add_row_above_button.connect_clicked(move |_| {
+        let selection_model = column_view_clone.model().and_downcast::<SingleSelection>().unwrap();
+        if let Some(_selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
+            let selected_index = selection_model.selected();
+            insert_empty_row(&model_clone, selected_index, MAX_VIDEO_PLAYERS);
+        }
+    });
+
+    let model_clone = model.clone();
+    let column_view_clone = column_view.clone();
+    add_row_below_button.connect_clicked(move |_| {
+        let selection_model = column_view_clone.model().and_downcast::<SingleSelection>().unwrap();
+        if let Some(_selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
+            let selected_index = selection_model.selected();
+            insert_empty_row(&model_clone, selected_index + 1, MAX_VIDEO_PLAYERS);
+        }
     });
 
     let button: Button = builder.object("new_video_player_button").expect("Failed to get button");
@@ -299,8 +318,6 @@ fn create_column_view() -> (ListStore, ColumnView) {
     let model_clone = model.clone();
 
     let selection_model = gtk::SingleSelection::new(Some(model_clone));
-    selection_model.set_autoselect(false);
-    selection_model.set_can_unselect(true);
     
     // Create the ColumnView
     let column_view = gtk::ColumnView::new(Some(selection_model));

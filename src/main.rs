@@ -1,14 +1,17 @@
 mod video_pipeline;
+use std::u32::MAX;
+
 use gio::ListStore;
-use glib::property::PropertyGet;
 use glib::{random_int_range, ExitCode, prelude::ObjectExt, Regex, RegexCompileFlags, RegexMatchFlags};
-use gstreamer::ClockTime;
+use gstreamer::{Clock, ClockTime};
 use gtk::{ColumnViewColumn, EventControllerFocus, FlowBox, FlowBoxChild, ListItem, SelectionMode, SingleSelection};
 use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button, ColumnView, CssProvider, Entry, Label};
 use gstgtk4;
 mod widgets;
 use widgets::video_player_widget::video_player::VideoPlayer;
 use widgets::split_panel::splits::VideoSegment;
+
+const MAX_VIDEO_PLAYERS: u32 = 6;
 
 #[derive(Clone)]
 enum SegmentField {
@@ -61,10 +64,9 @@ fn build_ui(app: &Application) -> Builder {
     let initial_child_count = 0_usize;
     store_data(&video_container, "count", initial_child_count);
     
-    let column_view_clone = column_view.clone();
     let model_clone = model.clone();
     add_row_button.connect_clicked(move |_| {
-        add_empty_row(&column_view_clone, &model_clone);
+        add_empty_row_with_columns(&model_clone, MAX_VIDEO_PLAYERS);
     });
 
     let button: Button = builder.object("new_video_player_button").expect("Failed to get button");
@@ -87,80 +89,20 @@ fn build_ui(app: &Application) -> Builder {
         // args[1] ID u32: index from the video player thats button was pressed
         // args[2] Position u64: time in nano seconds that the video player playback head was at when the button was pressed
         new_player.connect_local("button-clicked", false, move |args| {
-            let id: u32 = args[1].get().unwrap();
-            let position: u64 = args[2].get().unwrap();
+            let video_player_index: u32 = args[1].get().unwrap();
+            let video_player_position: u64 = args[2].get().unwrap();
 
+            // Sets the time for the selected row
             let selection_model = column_view_clone_clone.model().and_downcast::<SingleSelection>().unwrap();
             if let Some(selected_segment) = selection_model.selected_item().and_downcast::<VideoSegment>() {
                 let selected_index = selection_model.selected();
-                if let Some(previous_time) = get_previous_time(&model_clone_clone, selected_index, id) {
-                    selected_segment.set_segment(id as usize, position, position - previous_time);
-                } else {
-                    selected_segment.set_segment(id as usize, position, position);
-                }
-                model_clone_clone.remove(selected_index);
-                model_clone_clone.insert(selected_index, &selected_segment);
+                selected_segment.set_time(video_player_index as usize, video_player_position);
+                // fixes any conflicts resulting from adding the new time
+                correct_conflicts(&model_clone_clone, video_player_index, selected_index); // this updates durations after fixing any conflicts
+                //update_durations(&model_clone_clone, video_player_index, selected_index);
             } else {
                 eprintln!("No segment selected");
             }
-
-            update_durations(&model_clone_clone, id);
-            
-            {
-
-                // let row_count = model_clone_clone.n_items();
-                
-                // // Finds the appropriate index in the list of rows to add the new split
-                // let times = get_segment_times(&model_clone_clone, id as usize);
-                // let insert_row_index = get_new_split_index(times, position) as u32;
-    
-                // // Checks to see if the found index is an empty cell
-                // let segment_opt = model_clone_clone.item(insert_row_index).and_downcast::<VideoSegment>();
-                // match segment_opt {
-                //     // Found insert index is some where in the middle so we see where we should add the information
-                //     Some(seg) => {
-                //         let segment_time = seg.get_segment(id as usize).unwrap().time;
-                //         match segment_time {
-                //             // If a time in row already there exists then we make a new empty row
-                //             Some(_) => {
-                //                 insert_empty_row(&column_view_clone_clone, &model_clone_clone, insert_row_index);
-                //             }
-                //             // If a time doesn't exist we can fill the empty cell with the information
-                //             None => { }
-                //         }
-    
-                //     }
-                //     // Found insert index is at the end so we add an empty row
-                //     None => {
-                //         add_empty_row(&column_view_clone_clone, &model_clone_clone);
-                //     }
-                // }
-                // let new_segment = model_clone_clone.item(insert_row_index).and_downcast::<VideoSegment>().unwrap();
-                // // If it's the first row duration is equal to the splits time
-                // if insert_row_index == 0 {
-                //     new_segment.set_segment(id as usize, position, position);
-                // } else {
-                //     // THIS WILL NEED TO BE CHANGED to find the last time, previous to the new segment that exists, and set the duration accordingly
-                //     let previous_segment = model_clone_clone.item(insert_row_index - 1).and_downcast::<VideoSegment>().unwrap().get_segment(id as usize).unwrap();
-                //     let previous_time = previous_segment.time.unwrap_or_else(|| 0);
-                //     new_segment.set_segment(id as usize, position, position - previous_time);
-                // }
-                
-                // // Updates duration and display of next segment if new split is added before another
-                // if let Some(next_segment) = model_clone_clone.item(insert_row_index + 1).and_downcast::<VideoSegment>() {
-                //     let split = next_segment.get_segment(id as usize).unwrap();
-                //     if let (Some(time), Some(_)) = (split.time, split.duration) {
-                //         next_segment.set_duration(id as usize, time - position);
-                //         model_clone_clone.remove(insert_row_index + 1);
-                //         model_clone_clone.insert(insert_row_index + 1, &next_segment);
-                //     }
-                // }
-    
-                // // Updates the information in the newly inserted row
-                // model_clone_clone.remove(insert_row_index);
-                // model_clone_clone.insert(insert_row_index, &new_segment);
-            };
-
             None
         });
         
@@ -169,13 +111,13 @@ fn build_ui(app: &Application) -> Builder {
         // Column 2: (Duration) Segment time -> time since the last split
         let name = random_int_range(0, 99);
         let model_clone_clone = model_clone.clone();
-        add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), *count, SegmentField::Time);
-        add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), *count, SegmentField::Duration);
+        add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), *count, &format!("time-{}", count));
+        add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), *count, &format!("duration-{}", count));
         // Updates the data in the liststore to include the two new rows with empty data
-        for i in 0..model_clone_clone.n_items() {
-            let seg = model_clone_clone.item(i).and_downcast::<VideoSegment>().unwrap();
-            seg.add_segment(None,None);
-        }
+        // for i in 0..model_clone_clone.n_items() {
+        //     let seg = model_clone_clone.item(i).and_downcast::<VideoSegment>().unwrap();
+        //     seg.add_empty_segment();
+        // }
 
         // Updates formatting of the video players and adds the new video player to the container
         let number_of_columns = (*count as u32 + 1).clamp(1,3);
@@ -201,51 +143,82 @@ fn build_ui(app: &Application) -> Builder {
 }
 
 // Updates durations to correctly match the set segment times
-fn update_durations(model: &ListStore, video_index: u32) {
-    let row_count = model.n_items();
-    let mut previous_time: u64 = 0;
-    for i in 0..row_count {
+fn update_durations(model: &ListStore, video_player_index: u32, starting_row_index: u32) {
+    let number_of_rows = model.n_items();
+    let mut previous_time: u64 = match get_previous_time(model, video_player_index, starting_row_index) {
+        Some(time) => time,
+        None => 0,
+    };
+    for i in starting_row_index..number_of_rows {
         let current_video_segment = model.item(i).and_downcast::<VideoSegment>().unwrap();
-        let current_segment = current_video_segment.get_segment(video_index as usize).unwrap();
-        if let (Some(time), Some(duration)) = (current_segment.time, current_segment.duration) {
-            current_video_segment.set_duration(video_index as usize, time - previous_time);
+        let current_time = current_video_segment.get_time(video_player_index as usize);
+        let current_duration = current_video_segment.get_duration(video_player_index as usize);
+        if let (Some(time), Some(_duration)) = (current_time, current_duration) {
+            current_video_segment.set_duration(video_player_index as usize, time - previous_time);
             previous_time = time;
-            model.remove(i);
-            model.insert(i, &current_video_segment);
         }
     }
 }
 
-// Gets most recent previous time
-fn get_previous_time(model: &ListStore, row_index: u32, video_index: u32) -> Option<u64> {
+// Gets most recent previous time from the given row index
+fn get_previous_time(model: &ListStore, video_player_index: u32, row_index: u32) -> Option<u64> {
     for i in (0..row_index).rev() {
         let item = model.item(i).and_downcast::<VideoSegment>().unwrap();
-        if let Some(time) = item.get_segment(video_index as usize).unwrap().time {
+        if let Some(time) = item.get_time(video_player_index as usize) {
             return Some(time);
         }
     }
     return None;
 }
 
-// Gets all split time for indexed video
-fn get_segment_times(model: &ListStore, video_number: usize) -> Vec<u64> {
-    let mut times: Vec<u64> = vec![];
-    let split_count = model.n_items();
-    for i in 0..split_count {
-        let split = model.item(i).and_downcast::<VideoSegment>().unwrap();
-        let segment = split.get_segment(video_number).unwrap();
-        if let Some(time) = segment.time {
-            times.push(time);
-        }
+// Updates the times from a starting row to match the durations
+fn update_times(model: &ListStore, video_player_index: u32, starting_row_index: u32) {
+    let number_of_rows = model.n_items();
+    let mut previous_time = match get_previous_time(model, video_player_index, starting_row_index) {
+        Some(time) => time,
+        None => 0,
     };
-    times
+    for i in starting_row_index..number_of_rows {
+        let current_video_segment = model.item(i).and_downcast::<VideoSegment>().unwrap();
+        let current_time = current_video_segment.get_time(video_player_index as usize);
+        let current_duration = current_video_segment.get_duration(video_player_index as usize);
+        if let (Some(_time), Some(duration)) = (current_time, current_duration) {
+            let new_time = previous_time + duration;
+            current_video_segment.set_time(video_player_index as usize, new_time);
+            previous_time = new_time;
+        }
+
+    }
 }
 
-// Chooses the index where a new split should be added in the split table
-fn get_new_split_index(times: Vec<u64>, new_time: u64) -> usize {
-    let new_pos = times.binary_search(&new_time).unwrap_or_else(|e| e);
-    return new_pos;
+// Ensures the video segments hold a non-decreasing order around the starting_row_index row
+// Reduces the times that come before the starting row to match starting_row_time if they are greater
+// Increase the times that come after the starting row to match starting_row_time if they are smaller
+// Calls update_durations after fixing any conflicts
+fn correct_conflicts(model: &ListStore, video_player_index: u32, starting_row_index: u32) {
+    let starting_row = model.item(starting_row_index).and_downcast::<VideoSegment>().unwrap();
+    let starting_row_time = starting_row.get_time(video_player_index as usize).unwrap();
+    for i in (0..starting_row_index).rev() {
+        let current_row = model.item(i).and_downcast::<VideoSegment>().unwrap();
+        let current_time = current_row.get_time(video_player_index as usize).unwrap();
+        if current_time > starting_row_time {
+            current_row.set_time(video_player_index as usize, starting_row_time);
+        } else {
+            break;
+        }
+    }
+    for i in starting_row_index..model.n_items() {
+        let current_row = model.item(i).and_downcast::<VideoSegment>().unwrap();
+        let current_time = current_row.get_time(video_player_index as usize).unwrap();
+        if current_time < starting_row_time {
+            current_row.set_time(video_player_index as usize, starting_row_time);
+        } else {
+            break;
+        }
+    }
+    update_durations(model, video_player_index, 0);
 }
+
 
 // Used to make sure the split data is correctly being stored as this is separate from the displayed information in the table
 fn print_vec(model: &ListStore) {
@@ -253,15 +226,10 @@ fn print_vec(model: &ListStore) {
     for i in 0..model.n_items() {
         print!("Row: {i} ");
         if let Some(item) = model.item(i).and_downcast::<VideoSegment>() {
-            for j in 0..item.count() {
-                match item.get_segment(j) {
-                    Some(data) => {
-                        let time = data.time.map_or(String::from("None"), |v| v.to_string());
-                        let duration = data.duration.map_or(String::from("None"), |v| v.to_string());
-                        print!("{time}, {duration} |");
-                    } 
-                    None => print!("x |")
-                };
+            for j in 0..item.get_segment_count() {
+                let time = item.get_time(j).unwrap();
+                let duration = item.get_duration(j).unwrap();
+                print!("{time}, {duration} |");
             }
         }
         println!("");
@@ -327,7 +295,7 @@ fn create_column_view() -> (ListStore, ColumnView) {
 // index: video player id NOT the column index 
 // field: Time or Duration
 // Each video player gets two columns one for time and one for duration
-fn add_column(column_view: &gtk::ColumnView, _model: &ListStore, title: &str, index: usize, field: SegmentField) {
+fn add_column(column_view: &gtk::ColumnView, _model: &ListStore, title: &str, video_player_index: usize, prop_name: &str) {
     let factory = gtk::SignalListItemFactory::new();
     // Creates the entry objects
     factory.connect_setup(move |_, list_item| {
@@ -337,81 +305,139 @@ fn add_column(column_view: &gtk::ColumnView, _model: &ListStore, title: &str, in
 
     // Binds the stored data to the displayed entry objects
     let model_clone = _model.clone();
+    let property = prop_name.to_string();
     factory.connect_bind(move |_, list_item| {
-        // Get Entry object
-        let entry = list_item.child().unwrap().downcast::<gtk::Entry>().unwrap();
-        if let Some(item) = list_item.item().and_downcast::<VideoSegment>() {
-            let row_index = model_clone.find(&item).unwrap();
-            match item.get_segment(index) {
-                Some(data) => {
-                    // Gets the formatted clocktime of the specified field for the column
-                    let text = match field {
-                        SegmentField::Time => {
-                            data.time.map_or("none".to_string(), |t| format_clock(ClockTime::from_nseconds(t)))
-                        },
-                        SegmentField::Duration => {
-                            data.duration.map_or("none".to_string(), |d| format_clock(ClockTime::from_nseconds(d)))
-                        }
-                    };
-                    // Updates the entry object text to display the time
-                    entry.set_text(text.as_str());
-                    let t = text.as_str();
-                    //println!("Set {t} to column {index}, row {row_index}");
-                    // Stores the time as the last valid time to be used to rollback to if invalid time is manually entered by user
-                    store_data(&entry, "data", text);
+        let item = list_item.item().and_then(|obj| obj.downcast::<VideoSegment>().ok()).expect("The item is not a VideoSegment");
+        let entry = list_item.child().and_then(|child| child.downcast::<Entry>().ok()).expect("The child widget is not Entry");
+        let binding = item
+            .bind_property(&property, &entry, "text")
+            .flags(glib::BindingFlags::DEFAULT | glib::BindingFlags::SYNC_CREATE)
+            .transform_to(|_, value: u64| {
+                Some(format_clock(ClockTime::from_nseconds(value)).to_value())
+            })
+            .build();
+        store_data(list_item, &format!("binding-{}", property), binding);
 
-                    let focus_control = EventControllerFocus::new();
-                    
-                    // Signal for user to submit (Pressing Enter) manual edits to a cell in split table
-                    entry.connect_activate(glib::clone!(
-                        #[strong] field,
-                        #[weak(rename_to = entry)] entry,
-                        #[weak(rename_to = model)] model_clone,
-                        move |_| {
-                            // Validates the formatting of the user inputted time and updates the segment data and entry information
-                            //validate_and_apply(&entry, &field, &seg, index);
-                            let changed = has_changed(&entry);
-                            if !changed {
-                                println!("Nothing changed");
-                                return;
-                            } else {
-                                println!("Changed continue to updates");
-                            }
-                            let successful_update = update_split_with_propagation(&model, &field, index, row_index, &entry);
-                            if !successful_update {
-                                eprintln!("Did not propogate changes");
-                            }
+        entry.connect_activate(glib::clone!(
+            #[strong] property,
+            #[weak(rename_to = entry)] entry,
+            #[weak(rename_to = video_segment)] item,
+            #[weak(rename_to = model)] model_clone,
+            move |_| {
+                match &property {
+                    prop if prop.starts_with("name") => {
+                        // do name stuff here
+                        println!("Change name not impletemented");
+                    }
+                    prop if prop.starts_with("time-") => {
+                        println!("Changing {}", property);
+                        let row_index = model.find(&video_segment).unwrap();
+                        let valid_entry = validate_split_table_entry(&entry);
+                        if !valid_entry {
+                            let stored_entry_data = video_segment.property(property.as_str());
+                            entry.set_text(format_clock(ClockTime::from_nseconds(stored_entry_data)).as_str());
+                        } else {
+                            let new_time = string_to_nseconds(&entry.text().to_string()).unwrap();
+                            video_segment.set_time(video_player_index, new_time);
+                            correct_conflicts(&model, video_player_index as u32, row_index);
                         }
-                    ));
-                    
-                    // Signal for when user manually edits a cell in split table and leaves focus
-                    // Same as if the user submitted the edit
-                    focus_control.connect_leave(glib::clone!(
-                        #[strong] field,
-                        #[weak(rename_to = entry)] entry,
-                        #[weak(rename_to = model)] model_clone,
-                        move |_| {
-                            // Validates the formatting of the user inputted time and updates the segment data and entry information
-                            // let changed = has_changed(&entry);
-                            // if !changed {
-                            //     println!("Nothing changed");
-                            //     return;
-                            // } else {
-                            //     println!("Changed continue to updates");
-                            // }
-                            // let successful_update = update_split_with_propagation(&model, &field, index, row_index, &entry);
-                            // if !successful_update {
-                            //     eprintln!("Did not propogate changes");
-                            // }
+                    }
+                    prop if prop.starts_with("duration-") => {
+                        println!("Changing {}", property);
+                        let row_index = model.find(&video_segment).unwrap();
+                        let valid_entry = validate_split_table_entry(&entry);
+                        if !valid_entry {
+                            let stored_entry_data = video_segment.property(property.as_str());
+                            entry.set_text(format_clock(ClockTime::from_nseconds(stored_entry_data)).as_str());
+                        } else {
+                            let new_duration = string_to_nseconds(&entry.text().to_string()).unwrap();
+                            video_segment.set_duration(video_player_index, new_duration);
+                            let previous_time: u64 = match get_previous_time(&model, video_player_index as u32, row_index) {
+                                Some(time) => time,
+                                None => 0,
+                            };
+                            video_segment.set_time(video_player_index, previous_time + new_duration);
+                            correct_conflicts(&model, video_player_index as u32, row_index);
                         }
-                    ));
-                    
-                    // Adds the focus controller to the entry object
-                    entry.add_controller(focus_control);
-                } 
-                None => entry.set_text("Empty"),
-            };
-        }
+                    }
+                    _ => {
+                        eprintln!("Invalid property: {}", property);
+                    }
+                }
+            }
+        ));
+
+        // let entry = list_item.child().unwrap().downcast::<gtk::Entry>().unwrap();
+        // if let Some(item) = list_item.item().and_downcast::<VideoSegment>() {
+        //     let row_index = model_clone.find(&item).unwrap();
+            
+        //     // Gets the formatted clocktime of the specified field for the column
+        //     let text = match field {
+        //         SegmentField::Time => {
+        //             let time = item.get_time(video_player_index);
+        //             time.map_or("none".to_string(), |t| format_clock(ClockTime::from_nseconds(t)))
+        //         },
+        //         SegmentField::Duration => {
+        //             let duration = item.get_duration(video_player_index);
+        //             duration.map_or("none".to_string(), |d| format_clock(ClockTime::from_nseconds(d)))
+        //         }
+        //     };
+        //     // Updates the entry object text to display the time
+        //     entry.set_text(text.as_str());
+        //     let t = text.as_str();
+        //     //println!("Set {t} to column {index}, row {row_index}");
+        //     // Stores the time as the last valid time to be used to rollback to if invalid time is manually entered by user
+        //     store_data(&entry, "data", text);
+
+        //     let focus_control = EventControllerFocus::new();
+            
+        //     // Signal for user to submit (Pressing Enter) manual edits to a cell in split table
+        //     entry.connect_activate(glib::clone!(
+        //         #[strong] field,
+        //         #[weak(rename_to = entry)] entry,
+        //         #[weak(rename_to = model)] model_clone,
+        //         move |_| {
+        //             // Validates the formatting of the user inputted time and updates the segment data and entry information
+        //             //validate_and_apply(&entry, &field, &seg, index);
+        //             let changed = has_changed(&entry);
+        //             if !changed {
+        //                 println!("Nothing changed");
+        //                 return;
+        //             } else {
+        //                 println!("Changed continue to updates");
+        //             }
+        //             let successful_update = update_split_with_propagation(&model, &field, video_player_index, row_index, &entry);
+        //             if !successful_update {
+        //                 eprintln!("Did not propogate changes");
+        //             }
+        //         }
+        //     ));
+            
+        //     // Signal for when user manually edits a cell in split table and leaves focus
+        //     // Same as if the user submitted the edit
+        //     focus_control.connect_leave(glib::clone!(
+        //         #[strong] field,
+        //         #[weak(rename_to = entry)] entry,
+        //         #[weak(rename_to = model)] model_clone,
+        //         move |_| {
+        //             // Validates the formatting of the user inputted time and updates the segment data and entry information
+        //             // let changed = has_changed(&entry);
+        //             // if !changed {
+        //             //     println!("Nothing changed");
+        //             //     return;
+        //             // } else {
+        //             //     println!("Changed continue to updates");
+        //             // }
+        //             // let successful_update = update_split_with_propagation(&model, &field, index, row_index, &entry);
+        //             // if !successful_update {
+        //             //     eprintln!("Did not propogate changes");
+        //             // }
+        //         }
+        //     ));
+            
+        //     // Adds the focus controller to the entry object
+        //     entry.add_controller(focus_control);
+        // }
     });
 
     let column = gtk::ColumnViewColumn::new(Some(title), Some(factory));
@@ -426,15 +452,12 @@ fn validate_split_table_entry(entry: &Entry) -> bool {
     let re = Regex::match_simple(pattern, input.clone(), RegexCompileFlags::empty(), RegexMatchFlags::empty());
     if !re {
         println!("Entry is not in valid format");
-        // Resets displayed data to last valid entry
-        let previous_text = unsafe { get_data::<String>(entry, "data").unwrap().as_ref() };
-        entry.set_text(previous_text.as_str());
     }
     re
 }
 
 // 
-fn update_split_with_propagation(model: &ListStore, field: &SegmentField, index: usize, row_index: u32, entry: &Entry) -> bool {
+fn update_split_with_propagation(model: &ListStore, field: &SegmentField, video_player_index: usize, row_index: u32, entry: &Entry) -> bool {
     // Checks inputted formatting
     let propogate = validate_split_table_entry(&entry);
 
@@ -449,10 +472,10 @@ fn update_split_with_propagation(model: &ListStore, field: &SegmentField, index:
     let current_segment = model.item(row_index).unwrap().downcast::<VideoSegment>().unwrap();
     match field {
         SegmentField::Time => {
-            current_segment.set_time(index, time);
+            current_segment.set_time(video_player_index, time);
         }
         SegmentField::Duration => {
-            current_segment.set_duration(index, time);
+            current_segment.set_duration(video_player_index, time);
         }
     }
 
@@ -466,18 +489,18 @@ fn update_split_with_propagation(model: &ListStore, field: &SegmentField, index:
                 let mut previous_time: u64 = 0;
                 if i > 0 {
                     let previous_segment: VideoSegment = model.item(i - 1).unwrap().downcast::<VideoSegment>().unwrap();
-                    let previous_item = previous_segment.get_segment(index).unwrap();
-                    previous_time = previous_item.time.unwrap();
+                    let last_time = previous_segment.get_time(video_player_index).unwrap();
+                    previous_time = last_time;
                 }
                 let current_segment: VideoSegment = model.item(i).unwrap().downcast::<VideoSegment>().unwrap();
-                let current_item = current_segment.get_segment(index).unwrap();
-                let current_time = current_item.time.unwrap();
-                let current_duration = current_item.duration.unwrap();
+                let current_time = current_segment.get_time(video_player_index).unwrap();
+                let current_duration = current_segment.get_duration(video_player_index).unwrap();
                 let new_time = std::cmp::max(current_time, previous_time);
                 let new_duration = new_time - previous_time;
-                current_segment.set_segment(index, new_time, new_duration);
-                model.remove(i);
-                model.insert(i, &current_segment);
+                current_segment.set_time(video_player_index, new_time);
+                current_segment.set_duration(video_player_index, new_duration);
+                // model.remove(i);
+                // model.insert(i, &current_segment);
                 if current_duration == new_duration && current_time == new_time {
                     println!("Breaking at row {i}");
                     break;
@@ -491,16 +514,16 @@ fn update_split_with_propagation(model: &ListStore, field: &SegmentField, index:
                 let mut previous_time: u64 = 0;
                 if i > 0 {
                     let previous_segment: VideoSegment = model.item(i - 1).unwrap().downcast::<VideoSegment>().unwrap();
-                    let previous_item = previous_segment.get_segment(index).unwrap();
-                    previous_time = previous_item.time.unwrap();
+                    let last_time = previous_segment.get_time(video_player_index).unwrap();
+                    previous_time = last_time;
                 }
                 let current_segment: VideoSegment = model.item(i).unwrap().downcast::<VideoSegment>().unwrap();
-                let current_item = current_segment.get_segment(index).unwrap();
-                let current_duration = current_item.duration.unwrap();
+                let current_duration = current_segment.get_duration(video_player_index).unwrap();
                 let new_time = previous_time + current_duration;
-                current_segment.set_segment(index, new_time, current_duration);
-                model.remove(row_index);
-                model.insert(row_index, &current_segment);
+                current_segment.set_time(video_player_index, new_time);
+                current_segment.set_duration(video_player_index, current_duration);
+                // model.remove(row_index);
+                // model.insert(row_index, &current_segment);
             }
             true
         }
@@ -558,20 +581,18 @@ fn remove_column(column_view: &gtk::ColumnView) {
 }
 
 // Adds empty row to the liststore at the specified index
-fn insert_empty_row(column_view: &ColumnView, model: &ListStore, insert_index: u32) {
-    let column_count = column_view.columns().n_items() - 1;
+fn insert_empty_row(model: &ListStore, insert_index: u32, number_of_columns: u32) {
     let seg = VideoSegment::new(insert_index.to_string().as_str());
-    
-    for _ in 0..column_count {
+    for _ in 0..number_of_columns {
         seg.add_empty_segment();
     }
     model.insert(insert_index, &seg);
 }
 
 // Adds empty row to end of liststore
-fn add_empty_row(column_view: &ColumnView, model: &ListStore) {
+fn add_empty_row_with_columns(model: &ListStore, number_of_columns: u32) {
     let row_count = model.n_items();
-    insert_empty_row(column_view, model, row_count);
+    insert_empty_row(model, row_count, number_of_columns);
 }
 
 fn remove_row(model: &gio::ListStore, row_index: u32) {
@@ -662,6 +683,8 @@ fn main() -> glib::ExitCode {
             .expect("Failed to register resources.");
         
         let app = gtk::Application::new(None::<&str>, gtk::gio::ApplicationFlags::FLAGS_NONE);
+
+
         app.connect_activate(|app| {
 
             let window = ApplicationWindow::new(app);
@@ -672,6 +695,52 @@ fn main() -> glib::ExitCode {
             load_css("src\\widgets\\main_window\\style.css");
 
             let main_box = Box::new(gtk::Orientation::Horizontal, 10);
+            // let (liststore, column_view) = test_create();
+            
+            // liststore.insert(0, &VideoSegment::new("Hi"));
+            // liststore.insert(1, &VideoSegment::new("Woooo"));
+            
+            // for i in 0..2 {
+            //     let segment = liststore.item(i).and_downcast::<VideoSegment>().unwrap();
+            //     for _ in 0..3 {
+            //         segment.add_empty_test_segment();
+            //     }
+            // }
+
+            // test_column(&column_view, "Name", "name");
+            // for i in 0..6 {
+            //     test_column(&column_view, &format!("Time {}", i), &format!("time-{}", i));
+            //     test_column(&column_view, &format!("Duration {}", i), &format!("duration-{}", i));
+            // }
+            
+            
+
+            // let button = Button::new();
+            // button.set_label("edit random cell");
+
+            // let store_clone = liststore.clone();
+            // button.connect_clicked(move |_| {
+            //     let row = random_int_range(0, 2);
+            //     let column = random_int_range(1, 13);
+            //     let value = random_int_range(0, i32::MAX) as u64;
+            //     let segment = store_clone.item(row as u32).and_downcast::<VideoSegment>().unwrap();
+            //     let prop_name = match (column - 1) % 2 {
+            //         0 => {
+            //             let n = (column - 1) / 2;
+            //             format!("time-{}", n)
+            //         }
+            //         1 => {
+            //             let n = (column - 1) / 2;
+            //             format!("duration-{}", n)
+            //         }
+            //         _ => unimplemented!()
+            //     };
+            //     segment.set_property(&prop_name, value);
+            //     println!("Changed Row: {row}, Column: {column}, to {value}");
+            // });
+
+            // main_box.append(&column_view);
+            // main_box.append(&button);
 
             window.set_child(Some(&main_box));
             window.show();
@@ -690,3 +759,35 @@ fn main() -> glib::ExitCode {
     ExitCode::SUCCESS
 }
 
+fn test_column(column_view: &ColumnView, title: &str, prop_name: &str) {
+    let factory = gtk::SignalListItemFactory::new();
+    factory.connect_setup(move |_, list_item| {
+        let label = gtk::Label::new(None);
+        list_item.set_child(Some(&label));
+    });
+
+    let prop = prop_name.to_string();
+    factory.connect_bind(move |_, list_item| {
+        let item = list_item.item().and_then(|obj| obj.downcast::<VideoSegment>().ok()).expect("The item is not a VideoSegment");
+        let label = list_item.child().and_then(|child| child.downcast::<gtk::Label>().ok()).expect("The child widget is not Label");
+        let binding = item.bind_property(&prop, &label, "label").flags(glib::BindingFlags::DEFAULT | glib::BindingFlags::SYNC_CREATE).build();
+        store_data(list_item, &format!("binding-{}", prop), binding);
+    });
+
+    let col = gtk::ColumnViewColumn::new(Some(title), Some(factory));
+    column_view.append_column(&col);
+}
+
+fn test_create() -> (ListStore, ColumnView) {
+    let model = ListStore::new::<VideoSegment>();
+    let model_clone = model.clone();
+
+    let selection_model = gtk::SingleSelection::new(Some(model_clone));
+    selection_model.set_autoselect(false);
+    selection_model.set_can_unselect(true);
+    
+    // Create the ColumnView
+    let column_view = gtk::ColumnView::new(Some(selection_model));
+    
+    (model, column_view)
+}

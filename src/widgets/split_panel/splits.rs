@@ -4,17 +4,20 @@ use gtk::glib;
 use gtk::subclass::prelude::*;
 use imp::Segment;
 use std::cell::RefCell;
+use crate::widgets::split_panel::timeentry::TimeEntry;
 
 mod imp {
     use std::u64;
 
     use glib::{value::ToValue, ParamSpecBuilderExt};
 
+    use crate::widgets::split_panel::timeentry;
+
     use super::*;
     
     #[derive(Clone)]
     pub struct Segment {
-        pub time: Option<u64>,
+        pub time: TimeEntry,
         pub duration: Option<u64>,
     }
 
@@ -72,8 +75,9 @@ mod imp {
                 "name" => self.name.borrow().to_value(),
                 n if n.starts_with("time-") => {
                     let i = n["time-".len()..].parse::<usize>().unwrap();
-                    let val = self.segments.borrow().get(i).and_then(|v| v.time).unwrap_or(u64::MAX);
-                    val.to_value()
+                    let segments_ref = self.segments.borrow();
+                    let time_entry = &segments_ref[i].time;
+                    time_entry.get_time().to_value()
                 }
                 n if n.starts_with("duration-") => {
                     let i = n["duration-".len()..].parse::<usize>().unwrap();
@@ -97,7 +101,7 @@ mod imp {
                     let segments = &mut self.segments.borrow_mut();
                     if i < segments.len() {
                         let raw = value.get::<u64>().unwrap_or_default();
-                        segments[i].time = Some(raw);
+                        segments[i].time.set_time(raw);
                         self.notify(pspec);
                     }
                 }
@@ -156,7 +160,7 @@ impl VideoSegment {
     pub fn add_empty_segment(&self) {
         let imp = imp::VideoSegment::from_obj(self);
         let new_segment = Segment {
-            time: None,
+            time: TimeEntry::new(u64::MAX),
             duration: None,
         };
         imp.segments.borrow_mut().push(new_segment);

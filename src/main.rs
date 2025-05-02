@@ -340,6 +340,7 @@ fn add_column(column_view: &gtk::ColumnView, _model: &ListStore, title: &str, vi
     // Binds the stored data to the displayed entry objects
     let model_clone = _model.clone();
     let property = prop_name.to_string();
+    
     factory.connect_bind(move |_, list_item| {
         let item = list_item.item().and_then(|obj| obj.downcast::<VideoSegment>().ok()).expect("The item is not a VideoSegment");
         let entry = list_item.child().and_then(|child| child.downcast::<Entry>().ok()).expect("The child widget is not Entry");

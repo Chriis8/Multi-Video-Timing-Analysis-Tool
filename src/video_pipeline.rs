@@ -1,5 +1,5 @@
-use std::cell::RefCell;
-use gstreamer::{event::{Seek, Step}, prelude::*, SeekFlags, SeekType};
+use std::{cell::RefCell, time::Duration};
+use gstreamer::{event::{Seek, Step}, prelude::*, ClockTime, CoreError, ErrorMessage, SeekFlags, SeekType, StateChangeReturn, StateChangeSuccess};
 use gtk;
 use gtk::gdk;
 
@@ -348,11 +348,28 @@ impl VideoPipeline {
             let time_per_frame = 1_000_000_000 / fps as u64;
             let current_frame = current_time.nseconds() / time_per_frame;
             println!("Current_frame: {current_frame}");
-
         } else {
             println!("Can't get the framerate");
         }
-        
-        
+    }
+
+    pub fn get_length(&self) -> Option<u64> {
+        match self.pipeline.state(Some(ClockTime::from_seconds(5))) {
+            (Ok(_state_change_success), _, _) => {
+                if let Some(duration) = self.pipeline.query_duration::<ClockTime>() {
+                    println!("Got duration from get_length");
+                    Some(duration.nseconds())
+                } else {
+                    println!("Didnt get duration but state was success");
+                    let _ = self.pipeline.set_state(gstreamer::State::Null);
+                    None
+                }
+            }
+            _ => {
+                println!("State change not successful");
+                let _ = self.pipeline.set_state(gstreamer::State::Null);
+                None
+            }
+        }
     }
 }

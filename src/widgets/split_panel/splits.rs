@@ -5,6 +5,7 @@ use gtk::subclass::prelude::*;
 use imp::Segment;
 use std::cell::RefCell;
 use crate::widgets::split_panel::timeentry::TimeEntry;
+use std::rc::Rc;
 
 mod imp {
     use std::u64;
@@ -17,7 +18,7 @@ mod imp {
     
     #[derive(Clone)]
     pub struct Segment {
-        pub time: TimeEntry,
+        pub time: Rc<TimeEntry>,
         pub duration: Option<u64>,
     }
 
@@ -157,13 +158,14 @@ impl VideoSegment {
         self.set_property("name", new_name);
     }
 
-    pub fn add_empty_segment(&self) {
+    pub fn add_empty_segment(&self) -> Segment {
         let imp = imp::VideoSegment::from_obj(self);
         let new_segment = Segment {
-            time: TimeEntry::new(u64::MAX),
+            time: Rc::new(TimeEntry::new(u64::MAX)),
             duration: None,
         };
-        imp.segments.borrow_mut().push(new_segment);
+        imp.segments.borrow_mut().push(new_segment.clone());
+        new_segment
     }
 
     pub fn set_time(&self, video_player_index: usize, time: u64) {
@@ -173,5 +175,11 @@ impl VideoSegment {
 
     pub fn set_duration(&self, video_player_index: usize, duration: u64) {
         self.set_property(&format!("duration-{}", video_player_index), duration);
+    }
+
+    pub fn get_time_entry_copy(&self, video_player_index: usize) -> Rc<TimeEntry> {
+        let imp = imp::VideoSegment::from_obj(self);
+        let time_entry = imp.segments.borrow()[video_player_index].time.clone();
+        time_entry
     }
 }

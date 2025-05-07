@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+    <template class="SeekBar" parent="GtkBox">
+        <style><class name="seek-bar-box"></class></style>
+        <property name="halign">fill</property>
+        <child>
+            <object class="GtkOverlay" id="overlay">
+                <style><class name="seek-bar-overlay"></class></style>
+                <property name="hexpand">true</property>
+                <property name="vexpand">true</property>
+                <property name="visible">true</property>
+                
+                <child type="overlay">
+                    <object class="GtkFixed" id="fixed">
+                        <style><class name="seek-bar-fixed"></class></style>
+                        <property name="receives-default">false</property>
+                        <property name="can-target">false</property>
+                        <property name="hexpand">true</property>
+                        <property name="valign">center</property>
+                        <property name="visible">true</property>
+                    </object>
+                </child>
+                <child type="overlay">
+                    <object class="GtkScale" id="scale">
+                        <style><class name="seek-bar-scale"></class></style>
+                        <property name="orientation">horizontal</property>
+                        <property name="hexpand">true</property>
+                        <property name="valign">center</property>
+                        <property name="visible">true</property>
+                        <property name="adjustment">
+                            <object class="GtkAdjustment">
+                                <property name="lower">0</property>
+                                <property name="upper">100</property>
+                                <property name="step-increment">1</property>
+                                <property name="page-increment">10</property>
+                            </object>
+                        </property>
+                    </object>
+                </child>
+            </object>
+        </child>
+    </template>
+</interface>

@@ -1,13 +1,20 @@
 mod video_pipeline;
+use std::time::Duration;
+
 use gio::ListStore;
+use glib::timeout_add_local;
 use glib::{random_int_range, ExitCode, prelude::ObjectExt, Regex, RegexCompileFlags, RegexMatchFlags};
+use gstreamer::event::Seek;
 use gstreamer::{Clock, ClockTime};
-use gtk::{ColumnViewColumn, EventControllerFocus, FlowBox, FlowBoxChild, ListItem, SelectionMode, SingleSelection};
+use gtk::subclass::fixed;
+use gtk::{Adjustment, ColumnViewColumn, EventControllerFocus, FlowBox, FlowBoxChild, ListItem, SelectionMode, SingleSelection};
 use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button, ColumnView, CssProvider, Entry, Label};
 use gstgtk4;
 mod widgets;
+use widgets::video_player_widget::seek_bar::{self, SeekBar};
 use widgets::video_player_widget::video_player::VideoPlayer;
 use widgets::split_panel::splits::VideoSegment;
+use widgets::split_panel::timeentry::TimeEntry;
 
 const MAX_VIDEO_PLAYERS: u32 = 6;
 const STARTING_TIME: u64 = 0;
@@ -46,7 +53,6 @@ fn build_ui(app: &Application) -> Builder {
     let video_container: FlowBox = builder.object("video_container").expect("Failed to get video_container from UI File");
     let add_row_above_button: Button = builder.object("add_row_above_button").expect("Failed to get add_row_above_button from UI File");
     let add_row_below_button: Button = builder.object("add_row_below_button").expect("Failed to get add_row_below_button from UI File");
-
     
     video_container.set_homogeneous(true);
     video_container.set_valign(gtk::Align::Fill);
@@ -60,30 +66,35 @@ fn build_ui(app: &Application) -> Builder {
     let column_view_clone = column_view.clone();
     add_name_column(&column_view_clone, "Segment Name");
 
-    // Adds an initial row
-    add_empty_row_with_columns(&model, MAX_VIDEO_PLAYERS);
-    
     // Add data to video_container to keep track of the number of active videos
     let initial_child_count = 0_usize;
     store_data(&video_container, "count", initial_child_count);
+
+    // Adds an initial row
+    add_empty_row_with_columns(&model, MAX_VIDEO_PLAYERS);
+    
     
     let model_clone = model.clone();
     let column_view_clone = column_view.clone();
+    let video_container_clone = video_container.clone();
     add_row_above_button.connect_clicked(move |_| {
         let selection_model = column_view_clone.model().and_downcast::<SingleSelection>().unwrap();
         if let Some(_selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
             let selected_index = selection_model.selected();
             insert_empty_row(&model_clone, selected_index, MAX_VIDEO_PLAYERS);
+            connect_row_to_seekbar(&model_clone, &video_container_clone, selected_index);
         }
     });
 
     let model_clone = model.clone();
     let column_view_clone = column_view.clone();
+    let video_container_clone = video_container.clone();
     add_row_below_button.connect_clicked(move |_| {
         let selection_model = column_view_clone.model().and_downcast::<SingleSelection>().unwrap();
         if let Some(_selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
             let selected_index = selection_model.selected();
             insert_empty_row(&model_clone, selected_index + 1, MAX_VIDEO_PLAYERS);
+            connect_row_to_seekbar(&model_clone, &video_container_clone, selected_index + 1);
         }
     });
 
@@ -94,11 +105,11 @@ fn build_ui(app: &Application) -> Builder {
     let video_container_clone = video_container.clone();
     // Adds new video player and new columns to split table
     button.connect_clicked(move |_| {
-        let count = unsafe{ get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() };
+        let count = *unsafe{ get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() };
         let window: ApplicationWindow = builder_clone.object("main_window").expect("Failed to get main_window from UI file");
         
         // Sets up new video player
-        let new_player = VideoPlayer::new(*count as u32);
+        let new_player = VideoPlayer::new(count as u32);
         new_player.setup_event_handlers(window);
         
         let model_clone_clone = model_clone.clone();
@@ -130,17 +141,21 @@ fn build_ui(app: &Application) -> Builder {
         // Column 2: (Duration) Segment time -> time since the last split
         let name = random_int_range(0, 99);
         let model_clone_clone = model_clone.clone();
-        add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), *count, &format!("time-{}", count));
-        add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), *count, &format!("duration-{}", count));
+        add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), count, &format!("time-{}", count));
+        add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), count, &format!("duration-{}", count));
 
+        
         // Updates formatting of the video players and adds the new video player to the container
-        let number_of_columns = (*count as u32 + 1).clamp(1,3);
+        let number_of_columns = (count as u32 + 1).clamp(1,3);
         video_container_clone.set_max_children_per_line(number_of_columns);
         video_container_clone.set_min_children_per_line(number_of_columns);
         video_container_clone.append(&new_player);
-
+        
+        let video_player_index = count as u32;
         // Updates video_container data keeping track of the active video players
         store_data(&video_container_clone, "count", count + 1);
+
+        connect_column_to_seekbar(&model_clone_clone, &video_container_clone, video_player_index);
     });
 
     // Debug function to print the split data in liststore
@@ -477,6 +492,41 @@ fn add_empty_row_with_columns(model: &ListStore, number_of_columns: u32) {
     insert_empty_row(model, row_count, number_of_columns);
 }
 
+// Called right after adding a new row
+// Connects the new row of times in the split table to marks on the seekbar for each video
+fn connect_row_to_seekbar(model: &ListStore, video_container: &FlowBox, row_index: u32) {
+    let video_player_count = *unsafe { get_data::<usize>(video_container, "count").unwrap().as_ref() } as i32; 
+    let row = model.item(row_index).and_downcast::<VideoSegment>().unwrap();
+    let row_count = model.n_items();
+    for i in 0..video_player_count {
+        let video_player = video_container.child_at_index(i)
+            .and_then(|child| child.child())
+            .and_downcast::<VideoPlayer>()
+            .unwrap();
+        let time = row.get_time_entry_copy(i as usize);
+        // id should always be row_count regardless of if the row is inserted in the middle.
+        // not sure if it will matter but this should give marks unique ids
+        let row_id = row_count - 1; 
+        video_player.connect_time_to_seekbar(format!("video-{i}, row-{row_id}"), time);
+    }
+}
+
+// Called right after adding a new video player
+// Connects each of the times assoiciated with the new video to the seekbar
+fn connect_column_to_seekbar(model: &ListStore, video_container: &FlowBox, column_index: u32) {
+    let row_count = model.n_items();
+    let video_player = video_container.child_at_index(column_index as i32)
+        .and_then(|child| child.child())
+        .and_downcast::<VideoPlayer>()
+        .unwrap();
+    for i in 0..row_count {
+        let row = model.item(i).and_downcast::<VideoSegment>().unwrap();
+        let time = row.get_time_entry_copy(column_index as usize);
+        // id are given in order as they have already been created
+        video_player.connect_time_to_seekbar(format!("video-{column_index}, seg-{i}"), time);
+    }
+}
+
 fn remove_row(model: &gio::ListStore, row_index: u32) {
     if model.n_items() == 0 {
         eprintln!("No row to remove");
@@ -519,6 +569,9 @@ fn main() -> glib::ExitCode {
             .expect("Failed to register resources.");
 
         gio::resources_register_include!("spanel.gresource")
+            .expect("Failed to register resources.");
+
+        gio::resources_register_include!("seekbar.gresource")
             .expect("Failed to register resources.");
         
         let app = gtk::Application::new(None::<&str>, gtk::gio::ApplicationFlags::FLAGS_NONE);
@@ -636,6 +689,88 @@ fn main() -> glib::ExitCode {
         }
         return res
     } else if run_app == 2 {
+        gstreamer::init().unwrap();
+        gtk::init().unwrap();
+
+        std::env::set_var("GTK_THEME", "Adwaita:dark");
+
+        gstgtk4::plugin_register_static().expect("Failed to register gstgtk4 plugin");
+
+        gio::resources_register_include!("vplayer.gresource")
+            .expect("Failed to register resources.");
+
+        gio::resources_register_include!("mwindow.gresource")
+            .expect("Failed to register resources.");
+
+        gio::resources_register_include!("spanel.gresource")
+            .expect("Failed to register resources.");
+
+        gio::resources_register_include!("seekbar.gresource")
+            .expect("Failed to register resources.");
+        
+        let app = gtk::Application::new(None::<&str>, gtk::gio::ApplicationFlags::FLAGS_NONE);
+        app.connect_activate(move |app| {
+            
+            let window = ApplicationWindow::new(app);
+            
+            window.set_default_size(800, 600);
+            window.set_title(Some("Video Player"));
+            
+            load_css("src\\widgets\\main_window\\style.css");
+            
+            let main_box = Box::new(gtk::Orientation::Horizontal, 10);
+            let timeline_length = 1000000 as u64;
+            let seekbar = SeekBar::new(timeline_length);
+            let time = TimeEntry::new(0);
+            let time_rc = std::rc::Rc::new(time);
+            let time_rc_clone = time_rc.clone();
+            seekbar.add_mark("1".to_string(), time_rc_clone);
+
+            let time_rc_clone = time_rc.clone();
+            timeout_add_local(Duration::from_secs(1), move || {
+                let time_w = time_rc_clone.get_time();
+                time_rc_clone.set_time(time_w + 100000);
+                glib::ControlFlow::Continue
+            });
+            // let new_box = Box::new(gtk::Orientation::Horizontal, 10);
+            // let overlay_object = gtk::Overlay::new();
+            // let fixed_object = gtk::Fixed::new();
+            // fixed_object.set_receives_default(false);
+            // fixed_object.set_can_target(false);
+            // overlay_object.set_hexpand(true);
+            
+            // let scale = gtk::Scale::new(gtk::Orientation::Horizontal, Some(&Adjustment::new(0.0, 1.0, 100.0, 1.0, 0.0, 0.0)));
+            // scale.set_hexpand(true);
+
+            // overlay_object.add_overlay(&scale);
+            // overlay_object.add_overlay(&fixed_object);
+
+            // let mark = gtk::Label::new(Some("^"));
+
+            // fixed_object.put(&mark, 0.0, 300.0);
+
+            // new_box.append(&overlay_object);
+            main_box.append(&seekbar);
+
+
+            // //main_box.set_halign(gtk::Align::Fill);
+            // let length: u64 = 10000000000;
+            // let width = main_box.width();
+            // let height = 50;
+            // let sb = SeekBar::new(length, width, height);
+            // main_box.append(&sb);
+
+            window.set_child(Some(&main_box));
+            window.show();
+        });
+
+
+        let res = app.run();
+
+        unsafe {
+            gstreamer::deinit();
+        }
+        return res
     }
     
     ExitCode::SUCCESS

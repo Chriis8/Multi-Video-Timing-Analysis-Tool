@@ -34,8 +34,23 @@
     padding: 0px;
     min-width: 10px;
 }
-/* 
-.wow {
+
+/* .seek-bar-scale {
+    background-color: blue;
+} */
+/* .seek-bar-box {
+    background-color: chartreuse;
+} */
+
+/* .seek-bar-overlay {
+    background-color: aliceblue;
+} */
+
+/* .seek-bar-fixed {
+    background-color: crimson;
+} */
+
+/* .wow {
     background-color: red;
     margin: 0;
     padding: 0;
@@ -45,4 +60,4 @@
     background-color: blueviolet;
     margin: 0;
     padding: 0;
-} */
+}  */

@@ -5,16 +5,20 @@ use gtk::subclass::prelude::*;
 use gtk::CompositeTemplate;
 use gtk::CssProvider;
 use gtk::gdk::Display;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use crate::video_pipeline::VideoPipeline;
+use crate::widgets::split_panel::timeentry;
+use crate::widgets::split_panel::timeentry::TimeEntry;
 use std::rc::Rc;
 use std::cell::{Cell, RefCell};
 use once_cell::sync::Lazy;
 
 mod imp {
-    use gtk::{Box, Button, Label, Picture, Scale};
+    use gtk::{Box, Button, Label, Picture};
     use glib::subclass::Signal;
+
+    use crate::widgets::video_player_widget::seek_bar::SeekBar;
 
     use super::*;
     
@@ -46,11 +50,11 @@ mod imp {
         #[template_child]
         pub picture: TemplateChild<Picture>,
 
-        #[template_child]
-        pub scale_parent: TemplateChild<Box>,
+        // #[template_child]
+        // pub scale_parent: TemplateChild<Box>,
 
         #[template_child]
-        pub seek_bar: TemplateChild<Scale>,
+        pub seek_bar: TemplateChild<SeekBar>,
 
         #[template_child]
         pub label: TemplateChild<Label>,
@@ -97,7 +101,8 @@ mod imp {
             println!("Setting up seek bar!");
 
             let adjustment = gtk::Adjustment::new(0.0, 0.0, 100.0, 1.0, 0.0, 0.0);
-            self.seek_bar.set_adjustment(&adjustment);
+            let scale = self.seek_bar.get_scale();
+            scale.set_adjustment(&adjustment);
         }
     }
     
@@ -206,7 +211,7 @@ impl VideoPlayer {
             if let Ok(mut guard) = gstman.lock() {
                 if let Some(ref mut pipeline) = *guard {
                     // gets seek bar progress 0.0 - 1.0
-                    let percent = imp.seek_bar.value() / 100.0;
+                    let percent = imp.seek_bar.get_scale().value() / 100.0;
                     // Gets precentage time in nanoseconds of the total videos duration
                     let position = pipeline.percent_to_position(percent).expect("Failed to get position");
                     println!("Position: {position}");
@@ -218,7 +223,7 @@ impl VideoPlayer {
     }
 
     // Connects user control
-    fn connect_scale_drag_signals(&self, scale_box: &gtk::Box) {
+    fn connect_scale_drag_signals(&self, scale_box: &crate::SeekBar) {
 
         let imp = imp::VideoPlayer::from_obj(self);
 
@@ -273,7 +278,7 @@ impl VideoPlayer {
             #[weak(rename_to = pic)] imp.picture,
             #[weak(rename_to = win)] window,
             #[weak(rename_to = this)] self,
-            #[weak(rename_to = scale)] imp.seek_bar,
+            #[weak(rename_to = seekbar)] imp.seek_bar,
             move |_| {
                 let videos_filter = gtk::FileFilter::new();
                 videos_filter.set_name(Some("Video Files"));
@@ -309,7 +314,9 @@ impl VideoPlayer {
                                             pipeline.build_pipeline(Some(&text.label().to_string()));
                                             let paintable = pipeline.get_paintable();
                                             pic.set_paintable(Some(&paintable));
+                                            let scale = seekbar.get_scale();
                                             this.start_updating_scale(&scale);
+                                            seekbar.set_timeline_length(pipeline.get_length().unwrap());
                                         } else {
                                             eprintln!("No Video Pipeline available");
                                         }
@@ -429,13 +436,11 @@ impl VideoPlayer {
                 let pos = pipeline.get_position().unwrap();
                 let nanos: &dyn ToValue = &pos.nseconds();
                 let id: &dyn ToValue = &imp.id.get();
-                let n = pos.nseconds();
-                let i = imp.id.get();
                 this.emit_by_name::<()>("button_clicked", &[id, nanos]);
             }
         ));
 
-        Self::connect_scale_drag_signals(self,&imp.scale_parent);
+        Self::connect_scale_drag_signals(self,&imp.seek_bar);
         Self::load_css();
     }
 
@@ -450,4 +455,9 @@ impl VideoPlayer {
     //     let imp = imp::VideoPlayer::from_obj(self);
     //     Arc::downgrade(&imp.gstreamer_manager)
     // }
+
+    pub fn connect_time_to_seekbar(&self, id: String, time_entry: Rc<TimeEntry>) {
+        let imp = imp::VideoPlayer::from_obj(self);
+        imp.seek_bar.add_mark(id, time_entry);
+    }
 }

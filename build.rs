@@ -16,5 +16,10 @@ fn main() {
         &["src/widgets/split_panel"],
         "src/widgets/split_panel/spanel.gresource.xml", 
         "spanel.gresource");
+
+    glib_build_tools::compile_resources(
+        &["src/widgets/video_player_widget"], 
+        "src/widgets/video_player_widget/seekbar.gresource.xml", 
+        "seekbar.gresource");
     
 }

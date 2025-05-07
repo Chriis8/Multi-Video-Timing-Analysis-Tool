@@ -53,7 +53,8 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct TimeEntry(ObjectSubclass<imp::TimeEntry>);
+    pub struct TimeEntry(ObjectSubclass<imp::TimeEntry>)
+    @implements gtk::Buildable;
 }
 
 impl TimeEntry {

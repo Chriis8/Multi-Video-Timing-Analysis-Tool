@@ -43,23 +43,15 @@
                         <property name="vexpand">true</property>
                     </object>
                 </child>
-
                 <child>
-                    <object class="GtkBox" id="scale_parent">
-                        <style><class name="seek-bar-box"></class></style>
+                    <object class="SeekBar" id="seek_bar">
+                    <style><class name="seek-bar"></class></style>
                         <property name="hexpand">true</property>
-                        <property name="vexpand">true</property>
-                        <child>
-                            <object class="GtkScale" id="seek_bar">
-                            <style><class name="seek-bar"></class></style>
-                                <property name="hexpand">true</property>
-                                <property name="vexpand">false</property>
-                            </object>
-                        </child>
+                        <property name="vexpand">false</property>
+                        <property name="margin-top">10</property>
+                        <property name="margin-bottom">20</property>
                     </object>
                 </child>
-                
-
                 <child>
                     <object class="GtkLabel" id="label">
                         <property name="label">Position: 00:00:00</property>

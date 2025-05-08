@@ -8,7 +8,6 @@ use gtk::gdk::Display;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use crate::video_pipeline::VideoPipeline;
-use crate::widgets::split_panel::timeentry;
 use crate::widgets::split_panel::timeentry::TimeEntry;
 use std::rc::Rc;
 use std::cell::{Cell, RefCell};
@@ -130,7 +129,11 @@ mod imp {
                 vec![Signal::builder("button-clicked")
                     .flags(glib::SignalFlags::RUN_LAST)
                     .param_types([u32::static_type(), u64::static_type()])
-                    .build()
+                    .build(),
+                    Signal::builder("timeline-length-acquired")
+                    .flags(glib::SignalFlags::RUN_LAST)
+                    .param_types([u64::static_type()])
+                    .build(),
                     ]
                 });
             SIGNALS.as_ref()
@@ -316,7 +319,10 @@ impl VideoPlayer {
                                             pic.set_paintable(Some(&paintable));
                                             let scale = seekbar.get_scale();
                                             this.start_updating_scale(&scale);
-                                            seekbar.set_timeline_length(pipeline.get_length().unwrap());
+                                            let timeline_length = pipeline.get_length().unwrap();
+                                            seekbar.set_timeline_length(timeline_length);
+                                            let nanos: &dyn ToValue = &timeline_length;
+                                            this.emit_by_name::<()>("timeline-length-acquired", &[nanos]);
                                         } else {
                                             eprintln!("No Video Pipeline available");
                                         }
@@ -456,8 +462,8 @@ impl VideoPlayer {
     //     Arc::downgrade(&imp.gstreamer_manager)
     // }
 
-    pub fn connect_time_to_seekbar(&self, id: String, time_entry: Rc<TimeEntry>) {
+    pub fn connect_time_to_seekbar(&self, id: String, time_entry: Rc<TimeEntry>, color: &str) {
         let imp = imp::VideoPlayer::from_obj(self);
-        imp.seek_bar.add_mark(id, time_entry);
+        imp.seek_bar.add_mark(id, time_entry, color);
     }
 }

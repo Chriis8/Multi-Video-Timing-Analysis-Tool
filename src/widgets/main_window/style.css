@@ -35,6 +35,10 @@
     min-width: 10px;
 }
 
+.shared-seek-bar-container {
+    background-color: rgb(117, 186, 118);
+}
+
 /* .seek-bar-scale {
     background-color: blue;
 } */

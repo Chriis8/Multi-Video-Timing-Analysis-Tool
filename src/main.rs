@@ -2,7 +2,7 @@ mod video_pipeline;
 use std::time::Duration;
 
 use gio::ListStore;
-use glib::timeout_add_local;
+use glib::{shared, timeout_add_local};
 use glib::{random_int_range, ExitCode, prelude::ObjectExt, Regex, RegexCompileFlags, RegexMatchFlags};
 use gstreamer::event::Seek;
 use gstreamer::{Clock, ClockTime};
@@ -12,7 +12,7 @@ use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, 
 use gstgtk4;
 mod widgets;
 use widgets::video_player_widget::seek_bar::{self, SeekBar};
-use widgets::video_player_widget::video_player::VideoPlayer;
+use widgets::video_player_widget::video_player::{self, VideoPlayer};
 use widgets::split_panel::splits::VideoSegment;
 use widgets::split_panel::timeentry::TimeEntry;
 
@@ -53,7 +53,8 @@ fn build_ui(app: &Application) -> Builder {
     let video_container: FlowBox = builder.object("video_container").expect("Failed to get video_container from UI File");
     let add_row_above_button: Button = builder.object("add_row_above_button").expect("Failed to get add_row_above_button from UI File");
     let add_row_below_button: Button = builder.object("add_row_below_button").expect("Failed to get add_row_below_button from UI File");
-    
+    let shared_seek_bar_container: Box = builder.object("shared_seek_bar_container").expect("Failed to get shared_seek_bar_container from UI File");
+
     video_container.set_homogeneous(true);
     video_container.set_valign(gtk::Align::Fill);
     video_container.set_selection_mode(SelectionMode::None);
@@ -62,6 +63,9 @@ fn build_ui(app: &Application) -> Builder {
     let (model, column_view) = create_column_view();
     column_view_container.append(&column_view);
     
+    let shared_seek_bar = SeekBar::new(0);
+    shared_seek_bar_container.append(&shared_seek_bar);
+
     // Adds first row of segment names to the split table
     let column_view_clone = column_view.clone();
     add_name_column(&column_view_clone, "Segment Name");
@@ -77,24 +81,30 @@ fn build_ui(app: &Application) -> Builder {
     let model_clone = model.clone();
     let column_view_clone = column_view.clone();
     let video_container_clone = video_container.clone();
+    let shared_seek_bar_clone = shared_seek_bar.clone();
     add_row_above_button.connect_clicked(move |_| {
         let selection_model = column_view_clone.model().and_downcast::<SingleSelection>().unwrap();
         if let Some(_selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
             let selected_index = selection_model.selected();
             insert_empty_row(&model_clone, selected_index, MAX_VIDEO_PLAYERS);
             connect_row_to_seekbar(&model_clone, &video_container_clone, selected_index);
+            let video_player_count = *unsafe { get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() } as i32;
+            connect_row_to_shared_seekbar(&model_clone, &shared_seek_bar_clone, selected_index, video_player_count);
         }
     });
 
     let model_clone = model.clone();
     let column_view_clone = column_view.clone();
     let video_container_clone = video_container.clone();
+    let shared_seek_bar_clone = shared_seek_bar.clone();
     add_row_below_button.connect_clicked(move |_| {
         let selection_model = column_view_clone.model().and_downcast::<SingleSelection>().unwrap();
         if let Some(_selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
             let selected_index = selection_model.selected();
             insert_empty_row(&model_clone, selected_index + 1, MAX_VIDEO_PLAYERS);
             connect_row_to_seekbar(&model_clone, &video_container_clone, selected_index + 1);
+            let video_player_count = *unsafe { get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() } as i32;
+            connect_row_to_shared_seekbar(&model_clone, &shared_seek_bar_clone, selected_index + 1, video_player_count);
         }
     });
 
@@ -103,6 +113,7 @@ fn build_ui(app: &Application) -> Builder {
     let column_view_clone = column_view.clone();
     let model_clone = model.clone();
     let video_container_clone = video_container.clone();
+    let shared_seek_bar_clone = shared_seek_bar.clone();
     // Adds new video player and new columns to split table
     button.connect_clicked(move |_| {
         let count = *unsafe{ get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() };
@@ -135,6 +146,16 @@ fn build_ui(app: &Application) -> Builder {
             }
             None
         });
+
+        let shared_seek_bar_clone_clone = shared_seek_bar_clone.clone();
+        new_player.connect_local("timeline-length-acquired",false, move |args| {
+            let timeline_length: u64 = args[1].get().unwrap();
+            let current_timeline_length = shared_seek_bar_clone_clone.get_timeline_length();
+            if timeline_length > current_timeline_length {
+                shared_seek_bar_clone_clone.set_timeline_length(timeline_length);
+            }
+            None
+        });
         
         // Adds two columns to split table for each new video player
         // Column 1: (Time) Split time -> time since the start of the clip
@@ -156,15 +177,17 @@ fn build_ui(app: &Application) -> Builder {
         store_data(&video_container_clone, "count", count + 1);
 
         connect_column_to_seekbar(&model_clone_clone, &video_container_clone, video_player_index);
+        let video_player_count = *unsafe { get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() } as i32;
+        connect_column_to_shared_seekbar(&model_clone, &shared_seek_bar_clone, video_player_index, video_player_count);
     });
 
     // Debug function to print the split data in liststore
     // Used to make sure the split data is correctly being stored as this is separate from the displayed information in the table
-    let button: Button = builder.object("print_splits_button").expect("Failed to get new split button");
-    let model_clone = model.clone();
-    button.connect_clicked(move |_| {
-        print_vec(&model_clone);
-    });
+    // let button: Button = builder.object("print_splits_button").expect("Failed to get new split button");
+    // let model_clone = model.clone();
+    // button.connect_clicked(move |_| {
+    //     print_vec(&model_clone);
+    // });
 
     app.add_window(&window);
     window.show();
@@ -507,7 +530,7 @@ fn connect_row_to_seekbar(model: &ListStore, video_container: &FlowBox, row_inde
         // id should always be row_count regardless of if the row is inserted in the middle.
         // not sure if it will matter but this should give marks unique ids
         let row_id = row_count - 1; 
-        video_player.connect_time_to_seekbar(format!("video-{i}, row-{row_id}"), time);
+        video_player.connect_time_to_seekbar(format!("video-{i}, row-{row_id}"), time, "black");
     }
 }
 
@@ -523,7 +546,31 @@ fn connect_column_to_seekbar(model: &ListStore, video_container: &FlowBox, colum
         let row = model.item(i).and_downcast::<VideoSegment>().unwrap();
         let time = row.get_time_entry_copy(column_index as usize);
         // id are given in order as they have already been created
-        video_player.connect_time_to_seekbar(format!("video-{column_index}, seg-{i}"), time);
+        video_player.connect_time_to_seekbar(format!("video-{column_index}, seg-{i}"), time, "black");
+    }
+}
+
+fn connect_row_to_shared_seekbar(model: &ListStore, seekbar: &SeekBar, row_index: u32, video_player_count: i32) {
+    let row = model.item(row_index).and_downcast::<VideoSegment>().unwrap();
+    let row_count = model.n_items();
+    let colors = vec!["red", "blue", "green", "black", "coral", "lavender"];
+    for i in 0..video_player_count {
+        let time = row.get_time_entry_copy(i as usize);
+        // id should always be row_count regardless of if the row is inserted in the middle.
+        // not sure if it will matter but this should give marks unique ids
+        let row_id = row_count - 1; 
+        seekbar.add_mark(format!("video-{i}, row-{row_id}"), time, colors[i as usize]);
+    }
+}
+
+fn connect_column_to_shared_seekbar(model: &ListStore, seekbar: &SeekBar, column_index: u32, video_player_count: i32) {
+    let row_count = model.n_items();
+    let colors = vec!["red", "blue", "green", "black", "coral", "lavender"];
+    for i in 0..row_count {
+        let row = model.item(i).and_downcast::<VideoSegment>().unwrap();
+        let time = row.get_time_entry_copy(column_index as usize);
+        // id are given in order as they have already been created
+        seekbar.add_mark(format!("video-{column_index}, seg-{i}"), time, colors[(video_player_count - 1) as usize]);
     }
 }
 
@@ -724,7 +771,7 @@ fn main() -> glib::ExitCode {
             let time = TimeEntry::new(0);
             let time_rc = std::rc::Rc::new(time);
             let time_rc_clone = time_rc.clone();
-            seekbar.add_mark("1".to_string(), time_rc_clone);
+            seekbar.add_mark("1".to_string(), time_rc_clone, "black");
 
             let time_rc_clone = time_rc.clone();
             timeout_add_local(Duration::from_secs(1), move || {

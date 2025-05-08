@@ -65,10 +65,11 @@ impl SeekBar {
         widget
     }
 
-    pub fn add_mark(&self, id: String, time_entry: Rc<TimeEntry>) {
+    pub fn add_mark(&self, id: String, time_entry: Rc<TimeEntry>, color: &str) {
         let imp = imp::SeekBar::from_obj(self);
         
-        let mark = Label::new(Some("^"));
+        let mark = Label::new(None);
+        mark.set_markup(&format!("<span foreground='{color}'>^</span>"));
         mark.set_halign(gtk::Align::Start);
         mark.set_valign(gtk::Align::Center);
 
@@ -144,11 +145,6 @@ impl SeekBar {
         width * ratio
     }
 
-    pub fn check_width(&self) {
-        let imp = imp::SeekBar::from_obj(self);
-        println!("checking width: {}", imp.scale.allocation().width());
-    }
-
     pub fn get_scale(&self) -> Scale {
         let imp = imp::SeekBar::from_obj(self);
         imp.scale.get()
@@ -157,6 +153,11 @@ impl SeekBar {
     pub fn set_timeline_length(&self, timeline_length: u64) {
         let imp = imp::SeekBar::from_obj(self);
         *imp.timeline_length.borrow_mut() = timeline_length;
+    }
+
+    pub fn get_timeline_length(&self) -> u64 {
+        let imp = imp::SeekBar::from_obj(self);
+        *imp.timeline_length.borrow()
     }
 }
 

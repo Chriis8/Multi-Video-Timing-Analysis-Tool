@@ -5,7 +5,7 @@ use gtk::subclass::prelude::*;
 use gtk::CompositeTemplate;
 use gtk::CssProvider;
 use gtk::gdk::Display;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use crate::video_pipeline::VideoPipeline;
 use crate::widgets::split_panel::timeentry::TimeEntry;
@@ -456,11 +456,11 @@ impl VideoPlayer {
     //     imp.split_button.clone()
     // }
 
-    // // Gets the video players pipeline
-    // pub fn pipeline(&self) -> Weak<Mutex<Option<VideoPipeline>>> {
-    //     let imp = imp::VideoPlayer::from_obj(self);
-    //     Arc::downgrade(&imp.gstreamer_manager)
-    // }
+    // Gets the video players pipeline
+    pub fn pipeline(&self) -> Weak<Mutex<Option<VideoPipeline>>> {
+        let imp = imp::VideoPlayer::from_obj(self);
+        Arc::downgrade(&imp.gstreamer_manager)
+    }
 
     pub fn connect_time_to_seekbar(&self, id: String, time_entry: Rc<TimeEntry>, color: &str) {
         let imp = imp::VideoPlayer::from_obj(self);

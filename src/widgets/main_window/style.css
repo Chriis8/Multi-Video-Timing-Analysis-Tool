@@ -23,9 +23,9 @@
     padding: 1px;
 }
 
-.bottom-container {
+/* .bottom-container {
     background: rgb(77, 178, 211);
-}
+} */
 
 .new-video-player-button {
     background-color: chartreuse;
@@ -37,6 +37,22 @@
 
 .shared-seek-bar-container {
     background-color: rgb(117, 186, 118);
+}
+
+.shared-seek-bar-button-container {
+    background-color: rgb(255, 255, 255);
+}
+
+.bottom-vbox {
+    background-color: rgb(255, 0, 0);
+}
+
+.test1 {
+    background-color: darkgoldenrod;
+}
+
+.test2 {
+    background-color: violet;
 }
 
 /* .seek-bar-scale {

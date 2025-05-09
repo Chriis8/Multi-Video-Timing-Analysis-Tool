@@ -41,20 +41,31 @@ fn load_css(path: &str) {
     }
 }
 
+fn flowbox_children(flowbox: &FlowBox) -> impl Iterator<Item = gtk::Widget> {
+    std::iter::successors(flowbox.first_child(), |w| w.next_sibling())
+}
+
 fn build_ui(app: &Application) -> Builder {
     let builder = Builder::from_resource("/mainwindow/mwindow.ui");
     let _column_builder = Builder::from_resource("/spanel/spanel.ui");
 
     load_css("src\\widgets\\main_window\\style.css");
     load_css("src\\widgets\\split_panel\\style.css");
-
+    
     let window: ApplicationWindow = builder.object("main_window").expect("Failed to get main_window from UI file");
     let column_view_container: Box = builder.object("split_container").expect("Failed to column_view_container from UI File");
     let video_container: FlowBox = builder.object("video_container").expect("Failed to get video_container from UI File");
     let add_row_above_button: Button = builder.object("add_row_above_button").expect("Failed to get add_row_above_button from UI File");
     let add_row_below_button: Button = builder.object("add_row_below_button").expect("Failed to get add_row_below_button from UI File");
     let shared_seek_bar_container: Box = builder.object("shared_seek_bar_container").expect("Failed to get shared_seek_bar_container from UI File");
-
+    
+    let shared_previous_segment_button: Button = builder.object("shared_previous_segment_button").expect("Failed to get shared_previous_segment_button from UI File");
+    let shared_previous_frame_button: Button = builder.object("shared_previous_frame_button").expect("Failed to get shared_previous_frame_button from UI File");
+    let shared_play_button: Button = builder.object("shared_play_button").expect("Failed to get shared_play_button from UI File");
+    let shared_next_frame_button: Button = builder.object("shared_next_frame_button").expect("Failed to get share_play_button from UI File");
+    let shared_next_segment_button: Button = builder.object("shared_next_segment_button").expect("Failed to get shared_next_segment_button from UI File");
+    let jump_to_segment_button: Button = builder.object("jump_to_segment_button").expect("Failed to get jump_to_segment_button from UI File");
+    
     video_container.set_homogeneous(true);
     video_container.set_valign(gtk::Align::Fill);
     video_container.set_selection_mode(SelectionMode::None);
@@ -62,6 +73,251 @@ fn build_ui(app: &Application) -> Builder {
     
     let (model, column_view) = create_column_view();
     column_view_container.append(&column_view);
+
+    let video_container_clone = video_container.clone();
+    let column_view_clone = column_view.clone();
+    shared_previous_segment_button.connect_clicked(move |_| {
+        let selection_model = column_view_clone.model().and_downcast::<SingleSelection>().unwrap();
+        let selected_index = selection_model.selected();
+        let previous_index = selected_index.saturating_sub(1);
+        selection_model.set_selected(previous_index);
+        for (video_player_index, child) in flowbox_children(&video_container_clone).enumerate() {
+            let fb_child = match child.downcast_ref::<FlowBoxChild>() {
+                Some(c) => c,
+                None => continue,
+            };
+
+            let content = match fb_child.child() {
+                Some(c) => c,
+                None => continue,
+            };
+
+            let video_player = match content.downcast_ref::<VideoPlayer>() {
+                Some(vp) => vp,
+                None => continue,
+            };
+
+            let arc = match video_player.pipeline().upgrade() {
+                Some(a) => a,
+                None => {
+                    eprintln!("Shared jump to segment: Pipeline dropped");
+                    continue
+                }
+            };
+
+            let mut guard = match arc.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
+                    continue
+                }
+            };
+
+            if let Some(pipeline) = guard.as_mut() {
+                if let Some(selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
+                    let time = selection.get_time(video_player_index).and_then(|nanos| Some(ClockTime::from_nseconds(nanos))).unwrap();
+                    if let Ok(result) = pipeline.seek_position(time) {
+                        println!("Shared pipeline seek for video player {video_player_index} to position {time}");
+                    }
+                }
+            } else {
+                eprintln!("No pipeline for index {video_player_index}");
+            }
+        }
+        println!("Pressed shared preivous segment button");
+    });
+
+    let video_container_clone = video_container.clone();
+    shared_previous_frame_button.connect_clicked(move |_| {
+        let mut child_opt = video_container_clone.first_child();
+
+        while let Some(child) = child_opt {
+            if let Some(fb_child) = child.downcast_ref::<FlowBoxChild>() {
+                if let Some(content) = fb_child.child() {
+                    if let Some(video_player) = content.downcast_ref::<VideoPlayer>() {
+                        let gstman_weak = video_player.pipeline();
+                        if let Some(gstman) = gstman_weak.upgrade() {
+                            if let Ok(mut guard) = gstman.lock() {
+                                if let Some(ref mut pipeline) = *guard {
+                                    pipeline.frame_backward();
+                                    
+                                } else {
+                                    eprintln!("No Video Pipeline available");
+                                }
+                            } else {
+                                eprintln!("Failed to aquire lock on Video pipeline");
+                            }
+                        }
+                    }
+                }
+            }
+            child_opt = child.next_sibling();
+        }
+        println!("Pressed shared previous frame button");
+    });
+
+    let video_container_clone = video_container.clone();
+    shared_play_button.connect_clicked(move |_| {
+        let mut child_opt = video_container_clone.first_child();
+
+        while let Some(child) = child_opt {
+            if let Some(fb_child) = child.downcast_ref::<FlowBoxChild>() {
+                if let Some(content) = fb_child.child() {
+                    if let Some(video_player) = content.downcast_ref::<VideoPlayer>() {
+                        let gstman_weak = video_player.pipeline();
+                        if let Some(gstman) = gstman_weak.upgrade() {
+                            if let Ok(mut guard) = gstman.lock() {
+                                if let Some(ref mut pipeline) = *guard {
+                                    pipeline.play_video();
+                                    
+                                } else {
+                                    eprintln!("No Video Pipeline available");
+                                }
+                            } else {
+                                eprintln!("Failed to aquire lock on Video pipeline");
+                            }
+                        }
+                    }
+                }
+            }
+            child_opt = child.next_sibling();
+        }
+        println!("Pressed shared play button");
+    });
+
+    let video_container_clone = video_container.clone();
+    shared_next_frame_button.connect_clicked(move |_| {
+        let mut child_opt = video_container_clone.first_child();
+
+        while let Some(child) = child_opt {
+            if let Some(fb_child) = child.downcast_ref::<FlowBoxChild>() {
+                if let Some(content) = fb_child.child() {
+                    if let Some(video_player) = content.downcast_ref::<VideoPlayer>() {
+                        let gstman_weak = video_player.pipeline();
+                        if let Some(gstman) = gstman_weak.upgrade() {
+                            if let Ok(mut guard) = gstman.lock() {
+                                if let Some(ref mut pipeline) = *guard {
+                                    pipeline.frame_forward();
+                                    
+                                } else {
+                                    eprintln!("No Video Pipeline available");
+                                }
+                            } else {
+                                eprintln!("Failed to aquire lock on Video pipeline");
+                            }
+                        }
+                    }
+                }
+            }
+            child_opt = child.next_sibling();
+        }
+        println!("Pressed shared next frame button");
+    });
+
+    let video_container_clone = video_container.clone();
+    let column_view_clone = column_view.clone();
+    shared_next_segment_button.connect_clicked(move |_| {
+        let selection_model = column_view_clone.model().and_downcast::<SingleSelection>().unwrap();
+        let selected_index = selection_model.selected();
+        let next_index = (selected_index + 1).clamp(0, selection_model.n_items() - 1);
+        selection_model.set_selected(next_index);
+        for (video_player_index, child) in flowbox_children(&video_container_clone).enumerate() {
+            let fb_child = match child.downcast_ref::<FlowBoxChild>() {
+                Some(c) => c,
+                None => continue,
+            };
+
+            let content = match fb_child.child() {
+                Some(c) => c,
+                None => continue,
+            };
+
+            let video_player = match content.downcast_ref::<VideoPlayer>() {
+                Some(vp) => vp,
+                None => continue,
+            };
+
+            let arc = match video_player.pipeline().upgrade() {
+                Some(a) => a,
+                None => {
+                    eprintln!("Shared jump to segment: Pipeline dropped");
+                    continue
+                }
+            };
+
+            let mut guard = match arc.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
+                    continue
+                }
+            };
+
+            if let Some(pipeline) = guard.as_mut() {
+                if let Some(selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
+                    let time = selection.get_time(video_player_index).and_then(|nanos| Some(ClockTime::from_nseconds(nanos))).unwrap();
+                    if let Ok(result) = pipeline.seek_position(time) {
+                        println!("Shared pipeline seek for video player {video_player_index} to position {time}");
+                    }
+                }
+            } else {
+                eprintln!("No pipeline for index {video_player_index}");
+            }
+        }
+        println!("Pressed shared next segment button");
+    });
+
+    let video_container_clone = video_container.clone();
+    let column_view_clone = column_view.clone();
+    jump_to_segment_button.connect_clicked(move |_| {
+        for (video_player_index, child) in flowbox_children(&video_container_clone).enumerate() {
+            let fb_child = match child.downcast_ref::<FlowBoxChild>() {
+                Some(c) => c,
+                None => continue,
+            };
+
+            let content = match fb_child.child() {
+                Some(c) => c,
+                None => continue,
+            };
+
+            let video_player = match content.downcast_ref::<VideoPlayer>() {
+                Some(vp) => vp,
+                None => continue,
+            };
+
+            let arc = match video_player.pipeline().upgrade() {
+                Some(a) => a,
+                None => {
+                    eprintln!("Shared jump to segment: Pipeline dropped");
+                    continue
+                }
+            };
+
+            let mut guard = match arc.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
+                    continue
+                }
+            };
+
+            if let Some(pipeline) = guard.as_mut() {
+                let selection_model = column_view_clone.model().and_downcast::<SingleSelection>().unwrap();
+                if let Some(selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
+                    let time = selection.get_time(video_player_index).and_then(|nanos| Some(ClockTime::from_nseconds(nanos))).unwrap();
+                    if let Ok(result) = pipeline.seek_position(time) {
+                        println!("Shared pipeline seek for video player {video_player_index} to position {time}");
+                    }
+                }
+            } else {
+                eprintln!("No pipeline for index {video_player_index}");
+            }
+        }
+        println!("Pressed jump to segment button");
+    });
+
+
     
     let shared_seek_bar = SeekBar::new(0);
     shared_seek_bar_container.append(&shared_seek_bar);
@@ -107,6 +363,8 @@ fn build_ui(app: &Application) -> Builder {
             connect_row_to_shared_seekbar(&model_clone, &shared_seek_bar_clone, selected_index + 1, video_player_count);
         }
     });
+
+
 
     let button: Button = builder.object("new_video_player_button").expect("Failed to get button");
     let builder_clone = builder.clone();

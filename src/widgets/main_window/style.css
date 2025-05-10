@@ -44,15 +44,23 @@
 }
 
 .bottom-vbox {
-    background-color: rgb(255, 0, 0);
+    background-color: rgba(241, 140, 140, 0);
 }
 
-.test1 {
-    background-color: darkgoldenrod;
+scale slider {
+    background-color: rgb(29, 128, 249);
+    background-image: none;
 }
 
-.test2 {
-    background-color: violet;
+.seek-bar-scale {
+    padding-left: 16px;
+    padding-right: 16px;
+}
+
+.seek-bar-fixed {
+    background: rgba(255, 255, 0, 0);
+    margin-left: 16px;
+    margin-right: 16px;
 }
 
 /* .seek-bar-scale {

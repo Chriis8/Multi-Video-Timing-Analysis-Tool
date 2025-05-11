@@ -10,6 +10,7 @@ mod imp {
     #[derive(Default)]
     pub struct TimeEntry {
         pub time: RefCell<u64>,
+        pub old_time: RefCell<u64>,
     }
     
     #[gtk::glib::object_subclass]
@@ -28,25 +29,43 @@ mod imp {
                         .minimum(0)
                         .maximum(u64::MAX)
                         .flags(glib::ParamFlags::READWRITE)
+                        .build(),
+                        ParamSpecUInt64::builder("old_time")
+                        .nick("Old Time")
+                        .blurb("Old time in nanoseconds")
+                        .minimum(0)
+                        .maximum(u64::MAX)
+                        .flags(glib::ParamFlags::READWRITE)
                         .build()]
                 });
                 PROPERTIES.as_ref()
         }
 
         fn property(&self, id: usize, _pspec: &glib::ParamSpec) -> glib::Value {
-            if id == 1 {
-                self.time.borrow().to_value()
-            } else {
-                panic!("Invalid property ID {}", id);
+            match id {
+                1 => {
+                    self.time.borrow().to_value()
+                },
+                2 => {
+                    self.old_time.borrow().to_value()
+                }
+                _ => unimplemented!(),
             }
         }
 
         fn set_property(&self, id: usize, value: &glib::Value, _pspec: &glib::ParamSpec) {
-            if id == 1 {
-                let val = value.get::<u64>().unwrap();
-                let time= &mut *self.time.borrow_mut();
-                *time = val;
-                println!("Set Value: {val}");
+            match id {
+                1 => {
+                    let val = value.get::<u64>().unwrap();
+                    let old_time = self.time.borrow();
+                    *self.old_time.borrow_mut() = *old_time;
+                    *self.time.borrow_mut() = val;
+                    println!("Set Value: {val}, Old Value: {old_time}")
+                },
+                2 => {
+
+                },
+                _ => unimplemented!(),
             }
         }
     }
@@ -61,6 +80,7 @@ impl TimeEntry {
     pub fn new(time: u64) -> Self {
         let time_entry = glib::Object::new::<Self>();
         time_entry.set_property("time", time);
+        time_entry.set_property("old_time", time);
         time_entry
     }
 
@@ -71,4 +91,12 @@ impl TimeEntry {
     pub fn set_time(&self, new_time: u64) {
         self.set_property("time", new_time);
     }
+
+    pub fn get_old_time(&self) -> u64 {
+        self.property("old_time")
+    }
+
+    pub fn set_old_time(&self, time: u64) {
+        self.set_property("old_time", time);
+    } 
 }

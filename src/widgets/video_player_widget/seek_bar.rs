@@ -1,17 +1,14 @@
-use gtk::gsk::RenderNode;
-use gtk::gsk::Transform;
 use gtk::prelude::*;
 use gtk::glib;
-use gtk::subclass::fixed;
 use gtk::subclass::prelude::*;
 use gtk::CompositeTemplate;
-use gtk::Snapshot;
 use gtk::{Label, Overlay, Box, Scale, TemplateChild, Fixed};
 use std::{cell::RefCell, collections::HashMap};
 use std::rc::Rc;
 use crate::widgets::split_panel::timeentry::TimeEntry;
 
 mod imp {
+
     use super::*;
     
     #[derive(CompositeTemplate, Default)] 
@@ -64,9 +61,6 @@ impl SeekBar {
         let widget: Self = glib::Object::new::<Self>();
         let imp = imp::SeekBar::from_obj(&widget);
         *imp.timeline_length.borrow_mut() = timeline_length;
-
-
-
         widget
     }
 
@@ -80,7 +74,7 @@ impl SeekBar {
         mark.set_visible(false);
 
         imp.fixed.put(&mark, 0.0, 0.0);
-        self.update_mark_position(&mark.clone().upcast(), &time_entry);
+        //self.update_mark_position(&mark.clone().upcast(), &time_entry);
 
         time_entry.connect_notify_local(Some("time"), glib::clone!(
             #[strong(rename_to = fixed_overlay)] imp.fixed.clone(),
@@ -129,21 +123,25 @@ impl SeekBar {
         }
     }
 
-    fn update_mark_position(&self, widget: &gtk::Widget, time_entry: &TimeEntry) {
-        let time = time_entry.get_time();
+    fn update_mark_positions(&self) {
         let imp = imp::SeekBar::from_obj(self);
-        let widget_width = widget.allocated_width();
-        if *imp.timeline_length.borrow() == 0 {
-            return;
-        }
-        if time == u64::MAX {
-            widget.set_visible(false);
-            let x_pos = self.time_to_position(0);
-            imp.fixed.move_(widget, x_pos - (widget_width as f64 / 2.0), 25.0);
-        } else {
-            widget.set_visible(true);
-            let x_pos = self.time_to_position(time);
-            imp.fixed.move_(widget, x_pos - (widget_width as f64 / 2.0), 25.0);
+        for (time_entry, widget) in imp.marks.borrow().values() {
+            let widget_width = widget.allocated_width();
+            let time = time_entry.get_time();
+            if *imp.timeline_length.borrow() == 0 {
+                return;
+            }
+            if time == u64::MAX {
+                widget.set_visible(false);
+                let percent = 0.0;
+                let x_pos = percent * (imp.scale.width() - 4) as f64;
+                imp.fixed.move_(widget, x_pos - (widget_width as f64 / 2.0), 25.0);
+            } else {
+                widget.set_visible(true);
+                let percent = time as f64 / *imp.timeline_length.borrow() as f64;
+                let x_pos = percent * (imp.scale.width() - 4) as f64;
+                imp.fixed.move_(widget, x_pos - (widget_width as f64 / 2.0), 25.0);
+            }
         }
     }
 
@@ -162,6 +160,7 @@ impl SeekBar {
     pub fn set_timeline_length(&self, timeline_length: u64) {
         let imp = imp::SeekBar::from_obj(self);
         *imp.timeline_length.borrow_mut() = timeline_length;
+        self.update_mark_positions();
     }
 
     pub fn get_timeline_length(&self) -> u64 {

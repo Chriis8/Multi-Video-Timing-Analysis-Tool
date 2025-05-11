@@ -439,7 +439,13 @@ impl VideoPlayer {
                     Some(val) => val, None => return,
                 };
                 
-                let pos = pipeline.get_position().unwrap();
+                let pos = match pipeline.get_position() {
+                    Some(time) => time,
+                    None => {
+                        eprintln!("Failed to get position trying to set split time");
+                        return;
+                    }
+                };
                 let nanos: &dyn ToValue = &pos.nseconds();
                 let id: &dyn ToValue = &imp.id.get();
                 this.emit_by_name::<()>("button_clicked", &[id, nanos]);

@@ -164,6 +164,7 @@ impl VideoPlayer {
 
         *imp.continue_timeout.borrow_mut() = false;
         imp.seek_bar.set_auto_timeline_length_handling(false);
+        imp.seek_bar.add_tick_callback_timeout();
         imp.id.set(id);
 
         println!("created video player widget");

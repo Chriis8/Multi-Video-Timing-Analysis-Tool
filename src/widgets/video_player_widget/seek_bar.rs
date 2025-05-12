@@ -1,12 +1,15 @@
+use glib::random_int;
 use gtk::prelude::*;
 use gtk::glib;
 use gtk::subclass::prelude::*;
 use gtk::CompositeTemplate;
 use gtk::{Label, Overlay, Box, Scale, TemplateChild, Fixed};
 use std::collections::HashSet;
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::{RefCell, Cell}, collections::HashMap};
 use std::rc::Rc;
 use crate::widgets::split_panel::timeentry::TimeEntry;
+use glib::{SourceId, source};
+use gtk::prelude::WidgetExtManual;
 
 mod imp {
 
@@ -19,6 +22,8 @@ mod imp {
         pub timeline_length: Rc<RefCell<u64>>,
         pub timeline_dirty_flag: RefCell<bool>,
         pub auto_length_from_marks: RefCell<bool>,
+        pub updating_scale_width_timeout: RefCell<bool>,
+        pub last_width: Cell<i32>,
 
         #[template_child]
         pub scale: TemplateChild<Scale>,
@@ -65,7 +70,40 @@ impl SeekBar {
         let imp = imp::SeekBar::from_obj(&widget);
         *imp.timeline_length.borrow_mut() = timeline_length;
         *imp.auto_length_from_marks.borrow_mut() = auto_timeline_length_handling;
+        *imp.updating_scale_width_timeout.borrow_mut() = false;
         widget
+    }
+
+    pub fn add_tick_callback_timeout(&self) {
+        let self_weak = self.downgrade();
+        self.add_tick_callback(move |_, _| {
+            if let Some(this) = self_weak.upgrade() {
+                let imp = this.imp();
+                let current_width = imp.scale.allocation().width();
+                if imp.last_width.get() != current_width {
+                    imp.last_width.set(current_width);
+                    this.schedule_mark_update();
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
+    fn schedule_mark_update(&self) {
+        let imp = imp::SeekBar::from_obj(self);
+
+        if *imp.updating_scale_width_timeout.borrow_mut() {
+            return;
+        }
+        
+        *imp.updating_scale_width_timeout.borrow_mut() = true;
+        let self_weak = self.downgrade();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(100), move || {
+            if let Some(this) = self_weak.upgrade() {
+                this.update_mark_positions();
+                *this.imp().updating_scale_width_timeout.borrow_mut() = false;
+            }
+        });
     }
 
     pub fn add_mark(&self, id: String, time_entry: Rc<TimeEntry>, color: &str) {
@@ -125,7 +163,6 @@ impl SeekBar {
         ));
         
         mark.set_visible(true);
-        //imp.overlay.add_overlay_pass_through(&mark, true);
         
         imp.marks.borrow_mut().insert(id.clone(), (time_entry, mark.clone().upcast()));
     }

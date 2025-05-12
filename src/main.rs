@@ -320,6 +320,7 @@ fn build_ui(app: &Application) -> Builder {
 
     
     let shared_seek_bar = SeekBar::new(0, true);
+    shared_seek_bar.add_tick_callback_timeout();
     shared_seek_bar.set_can_target(false);
     shared_seek_bar.set_can_focus(false);
     shared_seek_bar_container.append(&shared_seek_bar);

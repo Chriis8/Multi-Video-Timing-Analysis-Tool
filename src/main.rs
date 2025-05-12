@@ -319,7 +319,7 @@ fn build_ui(app: &Application) -> Builder {
 
 
     
-    let shared_seek_bar = SeekBar::new(0);
+    let shared_seek_bar = SeekBar::new(0, true);
     shared_seek_bar.set_can_target(false);
     shared_seek_bar.set_can_focus(false);
     shared_seek_bar_container.append(&shared_seek_bar);
@@ -373,7 +373,10 @@ fn build_ui(app: &Application) -> Builder {
     let column_view_clone = column_view.clone();
     let model_clone = model.clone();
     let video_container_clone = video_container.clone();
+    
+    
     let shared_seek_bar_clone = shared_seek_bar.clone();
+    
     // Adds new video player and new columns to split table
     button.connect_clicked(move |_| {
         let count = *unsafe{ get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() };
@@ -385,7 +388,11 @@ fn build_ui(app: &Application) -> Builder {
         
         let model_clone_clone = model_clone.clone();
         let column_view_clone_clone = column_view_clone.clone();
-        let shared_seek_bar_clone_clone = shared_seek_bar_clone.clone();
+        
+        
+        //let shared_seek_bar_clone_clone = shared_seek_bar_clone.clone();
+        
+        
         // Listens to the split button from a video player
         // args[1] ID u32: index from the video player thats button was pressed
         // args[2] Position u64: time in nano seconds that the video player playback head was at when the button was pressed
@@ -396,9 +403,6 @@ fn build_ui(app: &Application) -> Builder {
             let selection_model = column_view_clone_clone.model().and_downcast::<SingleSelection>().unwrap();
             if let Some(selected_segment) = selection_model.selected_item().and_downcast::<VideoSegment>() {
                 let selected_index = selection_model.selected();
-                if video_player_position > shared_seek_bar_clone_clone.get_timeline_length() {
-                    shared_seek_bar_clone_clone.set_timeline_length(video_player_position);
-                }
                 selected_segment.set_time(video_player_index as usize, video_player_position);
                 
                 // update shared_seek_bar timeline length to be at the latest split
@@ -1032,7 +1036,7 @@ fn main() -> glib::ExitCode {
             
             let main_box = Box::new(gtk::Orientation::Horizontal, 10);
             let timeline_length = 1000000 as u64;
-            let seekbar = SeekBar::new(timeline_length);
+            let seekbar = SeekBar::new(timeline_length, false);
             let time = TimeEntry::new(0);
             let time_rc = std::rc::Rc::new(time);
             let time_rc_clone = time_rc.clone();

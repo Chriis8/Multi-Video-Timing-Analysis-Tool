@@ -30,7 +30,7 @@ mod imp {
                         .maximum(u64::MAX)
                         .flags(glib::ParamFlags::READWRITE)
                         .build(),
-                        ParamSpecUInt64::builder("old_time")
+                        ParamSpecUInt64::builder("old-time")
                         .nick("Old Time")
                         .blurb("Old time in nanoseconds")
                         .minimum(0)
@@ -57,8 +57,8 @@ mod imp {
             match id {
                 1 => {
                     let val = value.get::<u64>().unwrap();
-                    let old_time = self.time.borrow();
-                    *self.old_time.borrow_mut() = *old_time;
+                    let old_time = *self.time.borrow();
+                    *self.old_time.borrow_mut() = old_time;
                     *self.time.borrow_mut() = val;
                     println!("Set Value: {val}, Old Value: {old_time}")
                 },
@@ -80,7 +80,7 @@ impl TimeEntry {
     pub fn new(time: u64) -> Self {
         let time_entry = glib::Object::new::<Self>();
         time_entry.set_property("time", time);
-        time_entry.set_property("old_time", time);
+        time_entry.set_property("old-time", time);
         time_entry
     }
 
@@ -93,10 +93,10 @@ impl TimeEntry {
     }
 
     pub fn get_old_time(&self) -> u64 {
-        self.property("old_time")
+        self.property("old-time")
     }
 
-    pub fn set_old_time(&self, time: u64) {
-        self.set_property("old_time", time);
-    } 
+    // fn set_old_time(&self, time: u64) {
+    //     self.set_property("old-time", time);
+    // } 
 }

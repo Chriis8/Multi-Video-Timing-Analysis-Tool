@@ -3,6 +3,7 @@ use gtk::glib;
 use gtk::subclass::prelude::*;
 use gtk::CompositeTemplate;
 use gtk::{Label, Overlay, Box, Scale, TemplateChild, Fixed};
+use std::collections::HashSet;
 use std::{cell::RefCell, collections::HashMap};
 use std::rc::Rc;
 use crate::widgets::split_panel::timeentry::TimeEntry;
@@ -16,6 +17,8 @@ mod imp {
     pub struct SeekBar {
         pub marks: RefCell<HashMap<String, (Rc<TimeEntry>, gtk::Widget)>>,
         pub timeline_length: Rc<RefCell<u64>>,
+        pub timeline_dirty_flag: RefCell<bool>,
+        pub auto_length_from_marks: RefCell<bool>,
 
         #[template_child]
         pub scale: TemplateChild<Scale>,
@@ -57,10 +60,11 @@ glib::wrapper! {
 }
 
 impl SeekBar {
-    pub fn new(timeline_length: u64) -> Self {
+    pub fn new(timeline_length: u64, auto_timeline_length_handling: bool) -> Self {
         let widget: Self = glib::Object::new::<Self>();
         let imp = imp::SeekBar::from_obj(&widget);
         *imp.timeline_length.borrow_mut() = timeline_length;
+        *imp.auto_length_from_marks.borrow_mut() = auto_timeline_length_handling;
         widget
     }
 
@@ -76,15 +80,32 @@ impl SeekBar {
         imp.fixed.put(&mark, 0.0, 0.0);
         //self.update_mark_position(&mark.clone().upcast(), &time_entry);
 
+        let entry_time = time_entry.get_time();
+        if entry_time != u64::MAX && entry_time > *imp.timeline_length.borrow() && *imp.auto_length_from_marks.borrow() {
+            *imp.timeline_dirty_flag.borrow_mut() = true;
+        }
+
         time_entry.connect_notify_local(Some("time"), glib::clone!(
             #[strong(rename_to = fixed_overlay)] imp.fixed.clone(),
             #[strong(rename_to = mark_clone)] mark.clone(),
             #[strong(rename_to = timeline_length)] imp.timeline_length,
             #[strong(rename_to = scale)] imp.scale,
+            #[strong(rename_to = dirty_flag)] imp.timeline_dirty_flag,
+            #[weak(rename_to = this)] self,
+            #[strong(rename_to = auto_length)] imp.auto_length_from_marks,
             move |time_entry, _| {
+                let old_time = if time_entry.get_old_time() == u64::MAX { 0 } else { time_entry.get_old_time()};
                 let time = time_entry.get_time();
                 let width = scale.width();
                 let widget_width = mark_clone.allocated_width();
+                
+                if (old_time == *timeline_length.borrow() || time > *timeline_length.borrow()) && *auto_length.borrow() {
+                    *dirty_flag.borrow_mut() = true;
+                }
+                if *dirty_flag.borrow() {
+                    this.update_timeline_length();
+                }
+
                 if *timeline_length.borrow() == 0 {
                     eprintln!("Timeline_length is still 0");
                     return;
@@ -166,6 +187,32 @@ impl SeekBar {
     pub fn get_timeline_length(&self) -> u64 {
         let imp = imp::SeekBar::from_obj(self);
         *imp.timeline_length.borrow()
+    }
+
+    fn update_timeline_length(&self) {
+        let imp = imp::SeekBar::from_obj(self);
+        let largest_time = imp.marks
+            .borrow()
+            .values()
+            .filter_map(|(time_entry, _)| {
+                let time = time_entry.get_time();
+                if time == u64::MAX {
+                    Some(0)
+                } else {
+                    Some(time)
+                }
+            })
+            .max()
+            .unwrap_or(0);
+        
+        *imp.timeline_length.borrow_mut() = largest_time;
+        *imp.timeline_dirty_flag.borrow_mut() = false;
+        self.update_mark_positions();
+    }
+
+    pub fn set_auto_timeline_length_handling(&self, flag: bool) {
+        let imp = imp::SeekBar::from_obj(self);
+        *imp.auto_length_from_marks.borrow_mut() = flag;
     }
 }
 

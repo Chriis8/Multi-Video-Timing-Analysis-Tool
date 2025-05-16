@@ -20,6 +20,7 @@ mod imp {
     pub struct Segment {
         pub time: Rc<TimeEntry>,
         pub duration: Option<u64>,
+        pub offset: RefCell<u64>,
     }
 
     #[derive(Default)]
@@ -32,6 +33,13 @@ mod imp {
     impl ObjectSubclass for VideoSegment {
         const NAME: &'static str = "VideoSegment";
         type Type = super::VideoSegment;
+    }
+
+    impl VideoSegment {
+        fn notify_time_relative(&self, index: usize) {
+            let prop_name = format!("relative-time-{}", index);
+            self.obj().notify(&prop_name);
+        }
     }
 
     impl ObjectImpl for VideoSegment {
@@ -63,8 +71,26 @@ mod imp {
                             .maximum(u64::MAX)
                             .default_value(0)
                             .flags(glib::ParamFlags::READWRITE)
-                            .build()                        
-                        )
+                            .build()
+                        );
+                        props.push(glib::ParamSpecUInt64::builder(&format!("offset-{}", i))
+                            .nick(&format!("Offset {}", i))
+                            .blurb("Offset Time")
+                            .minimum(0)
+                            .maximum(u64::MAX)
+                            .default_value(0)
+                            .flags(glib::ParamFlags::READWRITE)
+                            .build()
+                        );
+                        props.push(glib::ParamSpecUInt64::builder(&format!("relative-time-{}", i))
+                            .nick(&format!("Time Relative {}", i))
+                            .blurb("Time - Offset")
+                            .minimum(0)
+                            .maximum(u64::MAX)
+                            .default_value(0)
+                            .flags(glib::ParamFlags::READWRITE)
+                            .build()
+                        );
                     }
                     props
                 });
@@ -85,6 +111,23 @@ mod imp {
                     let val = self.segments.borrow().get(i).and_then(|v| v.duration).unwrap_or(u64::MAX);
                     val.to_value()
                 }
+                n if n.starts_with("offset-") => {
+                    let i = n["offset-".len()..].parse::<usize>().unwrap();
+                    let segments_ref = self.segments.borrow();
+                    let offset = segments_ref[i].offset.borrow();
+                    offset.to_value()
+                }
+                n if n.starts_with("relative-time-") => {
+                    let i = n["relative-time-".len()..].parse::<usize>().unwrap();
+                    let segments_ref = self.segments.borrow();
+                    let offset = segments_ref[i].offset.borrow();
+                    let time = self.segments.borrow()[i].time.get_time();
+                    if time == u64::MAX {
+                        return time.to_value();
+                    } else {
+                        return time.saturating_sub(*offset).to_value();
+                    }
+                }
                 _ => unimplemented!()
             }
         }
@@ -104,6 +147,8 @@ mod imp {
                         let raw = value.get::<u64>().unwrap_or_default();
                         segments[i].time.set_time(raw);
                         self.notify(pspec);
+                        self.notify(pspec);
+                        self.notify_time_relative(i);
                     }
                 }
                 n if n.starts_with("duration-") => {
@@ -113,6 +158,16 @@ mod imp {
                         let raw = value.get::<u64>().unwrap_or_default();
                         segments[i].duration = Some(raw);
                         self.notify(pspec);
+                    }
+                },
+                n if n.starts_with("offset-") => {
+                    let i = n["offset-".len()..].parse::<usize>().unwrap();
+                    let segments = &mut self.segments.borrow_mut();
+                    if i < segments.len() {
+                        let raw = value.get::<u64>().unwrap_or_default();
+                        segments[i].offset = raw.into();
+                        self.notify(pspec);
+                        self.notify_time_relative(i);
                     }
                 }
                 _ => {}
@@ -163,6 +218,7 @@ impl VideoSegment {
         let new_segment = Segment {
             time: Rc::new(TimeEntry::new(u64::MAX)),
             duration: None,
+            offset: 0.into(),
         };
         imp.segments.borrow_mut().push(new_segment.clone());
         new_segment
@@ -181,5 +237,14 @@ impl VideoSegment {
         let imp = imp::VideoSegment::from_obj(self);
         let time_entry = imp.segments.borrow()[video_player_index].time.clone();
         time_entry
+    }
+
+    pub fn set_offset(&self, video_player_index: usize, offset: u64) {
+        println!("Setting {video_player_index} offset to: {offset}");
+        self.set_property(&format!("offset-{}", video_player_index), offset);
+    }
+
+    pub fn get_offset(&self, video_player_index: usize) -> u64 {
+        self.property(&format!("offset-{}", video_player_index))
     }
 }

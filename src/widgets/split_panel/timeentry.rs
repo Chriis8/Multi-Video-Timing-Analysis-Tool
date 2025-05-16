@@ -36,7 +36,7 @@ mod imp {
                         .minimum(0)
                         .maximum(u64::MAX)
                         .flags(glib::ParamFlags::READWRITE)
-                        .build()]
+                        .build(),]
                 });
                 PROPERTIES.as_ref()
         }
@@ -48,7 +48,7 @@ mod imp {
                 },
                 2 => {
                     self.old_time.borrow().to_value()
-                }
+                },
                 _ => unimplemented!(),
             }
         }
@@ -60,7 +60,7 @@ mod imp {
                     let old_time = *self.time.borrow();
                     *self.old_time.borrow_mut() = old_time;
                     *self.time.borrow_mut() = val;
-                    println!("Set Value: {val}, Old Value: {old_time}")
+                    println!("Set Value: {val}, Old Value: {old_time}");
                 },
                 2 => {
 

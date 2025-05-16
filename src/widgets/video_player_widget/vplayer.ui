@@ -89,14 +89,14 @@
                         </child>
 
                         <child>
-                            <object class="GtkButton" id="split_button">
-                                <property name="label">Split</property>
+                            <object class="GtkButton" id="test_button">
+                                <property name="label">Test</property>
                             </object>
                         </child>
 
                         <child>
-                            <object class="GtkButton" id="test_button">
-                                <property name="label">Test</property>
+                            <object class="GtkButton" id="split_button">
+                                <property name="label">Split</property>
                             </object>
                         </child>
                     </object>

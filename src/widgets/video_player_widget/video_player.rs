@@ -425,8 +425,8 @@ impl VideoPlayer {
         ));
         
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
-        // Test button: currently used to for splitting segments
-        imp.test_button.connect_clicked(glib::clone!(
+        // Split button: Splits the video at the current time for the currently selected segment.
+        imp.split_button.connect_clicked(glib::clone!(
             #[weak(rename_to = this)] self,
             #[strong] gstman_weak,
             #[weak] imp,

@@ -76,35 +76,19 @@ impl SeekBar {
 
     pub fn add_tick_callback_timeout(&self) {
         let self_weak = self.downgrade();
-        self.add_tick_callback(move |_, _| {
-            if let Some(this) = self_weak.upgrade() {
+        let source_id = glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            if let Some(this) = self_weak.upgrade(){
                 let imp = this.imp();
                 let current_width = imp.scale.allocation().width();
                 if imp.last_width.get() != current_width {
                     imp.last_width.set(current_width);
-                    this.schedule_mark_update();
+                    this.update_mark_positions();
                 }
             }
             glib::ControlFlow::Continue
         });
     }
 
-    fn schedule_mark_update(&self) {
-        let imp = imp::SeekBar::from_obj(self);
-
-        if *imp.updating_scale_width_timeout.borrow_mut() {
-            return;
-        }
-        
-        *imp.updating_scale_width_timeout.borrow_mut() = true;
-        let self_weak = self.downgrade();
-        glib::timeout_add_local_once(std::time::Duration::from_millis(100), move || {
-            if let Some(this) = self_weak.upgrade() {
-                this.update_mark_positions();
-                *this.imp().updating_scale_width_timeout.borrow_mut() = false;
-            }
-        });
-    }
 
     pub fn add_mark(&self, id: String, time_entry: Rc<TimeEntry>, color: &str) {
         let imp = imp::SeekBar::from_obj(self);
@@ -161,8 +145,6 @@ impl SeekBar {
                 }
             }
         ));
-        
-        mark.set_visible(true);
         
         imp.marks.borrow_mut().insert(id.clone(), (time_entry, mark.clone().upcast()));
     }

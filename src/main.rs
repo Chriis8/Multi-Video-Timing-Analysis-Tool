@@ -1,10 +1,11 @@
 mod video_pipeline;
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use gio::ListStore;
-use glib::{shared, timeout_add_local};
+use glib::property::PropertyGet;
+use glib::{timeout_add_local};
 use glib::{random_int_range, ExitCode, prelude::ObjectExt, Regex, RegexCompileFlags, RegexMatchFlags};
-use gstreamer::event::Seek;
 use gstreamer::{Clock, ClockTime};
 use gtk::subclass::fixed;
 use gtk::{Adjustment, ColumnViewColumn, EventControllerFocus, FlowBox, FlowBoxChild, ListItem, SelectionMode, SingleSelection};
@@ -15,14 +16,16 @@ use widgets::video_player_widget::seek_bar::{self, SeekBar};
 use widgets::video_player_widget::video_player::{self, VideoPlayer};
 use widgets::split_panel::splits::VideoSegment;
 use widgets::split_panel::timeentry::TimeEntry;
+use std::sync::{Arc, Mutex};
+use std::rc::Rc;
 
 const MAX_VIDEO_PLAYERS: u32 = 6;
 const STARTING_TIME: u64 = 0;
 
 #[derive(Clone)]
-enum SegmentField {
-    Time,
-    Duration,
+enum TimeDisplayMode {
+    Absolute,
+    Relative,
 }
 
 fn load_css(path: &str) {
@@ -48,6 +51,7 @@ fn flowbox_children(flowbox: &FlowBox) -> impl Iterator<Item = gtk::Widget> {
 fn build_ui(app: &Application) -> Builder {
     let builder = Builder::from_resource("/mainwindow/mwindow.ui");
     let _column_builder = Builder::from_resource("/spanel/spanel.ui");
+    
 
     load_css("src\\widgets\\main_window\\style.css");
     load_css("src\\widgets\\split_panel\\style.css");
@@ -58,7 +62,8 @@ fn build_ui(app: &Application) -> Builder {
     let add_row_above_button: Button = builder.object("add_row_above_button").expect("Failed to get add_row_above_button from UI File");
     let add_row_below_button: Button = builder.object("add_row_below_button").expect("Failed to get add_row_below_button from UI File");
     let shared_seek_bar_container: Box = builder.object("shared_seek_bar_container").expect("Failed to get shared_seek_bar_container from UI File");
-    
+    let start_time_offset_container: Box = builder.object("start_time_offset_container").expect("Failed to get start_time_offset_container from UI File");
+
     let shared_previous_segment_button: Button = builder.object("shared_previous_segment_button").expect("Failed to get shared_previous_segment_button from UI File");
     let shared_previous_frame_button: Button = builder.object("shared_previous_frame_button").expect("Failed to get shared_previous_frame_button from UI File");
     let shared_play_button: Button = builder.object("shared_play_button").expect("Failed to get shared_play_button from UI File");
@@ -71,8 +76,11 @@ fn build_ui(app: &Application) -> Builder {
     video_container.set_selection_mode(SelectionMode::None);
     video_container.set_column_spacing(0);
     
-    let (model, column_view) = create_column_view();
+    let (model, column_view) = create_column_view::<VideoSegment>();
     column_view_container.append(&column_view);
+
+    let (start_time_offset_model, start_time_offset_column_view) = create_column_view::<TimeEntry>();
+    start_time_offset_container.append(&start_time_offset_column_view);
 
     let video_container_clone = video_container.clone();
     let column_view_clone = column_view.clone();
@@ -317,7 +325,13 @@ fn build_ui(app: &Application) -> Builder {
         println!("Pressed jump to segment button");
     });
 
-
+    let start_time_offset_column_view_clone = start_time_offset_column_view.clone();
+    let start_time_offset_model_clone = start_time_offset_model.clone();
+    let split_table_model_clone = model.clone();
+    build_start_time_offset_column(&start_time_offset_column_view_clone,
+        &start_time_offset_model_clone, 
+        &split_table_model_clone,
+        "Start Time Offsets");
     
     let shared_seek_bar = SeekBar::new(0, true);
     shared_seek_bar.add_tick_callback_timeout();
@@ -374,7 +388,7 @@ fn build_ui(app: &Application) -> Builder {
     let column_view_clone = column_view.clone();
     let model_clone = model.clone();
     let video_container_clone = video_container.clone();
-    
+    let start_time_offset_model_clone = start_time_offset_model.clone();
     
     let shared_seek_bar_clone = shared_seek_bar.clone();
     
@@ -389,7 +403,6 @@ fn build_ui(app: &Application) -> Builder {
         
         let model_clone_clone = model_clone.clone();
         let column_view_clone_clone = column_view_clone.clone();
-        
         
         //let shared_seek_bar_clone_clone = shared_seek_bar_clone.clone();
         
@@ -432,9 +445,12 @@ fn build_ui(app: &Application) -> Builder {
         // Column 2: (Duration) Segment time -> time since the last split
         let name = random_int_range(0, 99);
         let model_clone_clone = model_clone.clone();
-        add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), count, &format!("time-{}", count));
+        add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), count, &format!("relative-time-{}", count));
         add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), count, &format!("duration-{}", count));
 
+        // Adds start time offset entry text to start_time_offset liststore/columnview
+        let new_start_time_offset_time_entry = TimeEntry::new(0);
+        start_time_offset_model_clone.append(&new_start_time_offset_time_entry);
         
         // Updates formatting of the video players and adds the new video player to the container
         let number_of_columns = (count as u32 + 1).clamp(1,3);
@@ -620,9 +636,9 @@ fn string_to_nseconds(time: &String) -> Option<u64> {
     return Some(total_nanos);
 }
 
-fn create_column_view() -> (ListStore, ColumnView) {
+fn create_column_view<T: 'static + IsA<glib::Object>>() -> (ListStore, ColumnView) {
     // Create a ListStore to hold VideoSegment data
-    let model = gio::ListStore::new::<VideoSegment>();
+    let model = gio::ListStore::new::<T>();
     let model_clone = model.clone();
 
     let selection_model = gtk::SingleSelection::new(Some(model_clone));
@@ -648,19 +664,21 @@ fn add_column(column_view: &gtk::ColumnView, _model: &ListStore, title: &str, vi
     // Binds the stored data to the displayed entry objects
     let model_clone = _model.clone();
     let property = prop_name.to_string();
-    
     factory.connect_bind(move |_, list_item| {
         let item = list_item.item().and_then(|obj| obj.downcast::<VideoSegment>().ok()).expect("The item is not a VideoSegment");
         let entry = list_item.child().and_then(|child| child.downcast::<Entry>().ok()).expect("The child widget is not Entry");
-        let binding = item
-            .bind_property(&property, &entry, "text")
+        // Binds the u64 stored in the video segment to the entries formatted clock
+        // Any changes to the videosegment will be updated in the entry object
+        let binding = item.bind_property(&property, &entry, "text")
             .flags(glib::BindingFlags::DEFAULT | glib::BindingFlags::SYNC_CREATE)
-            .transform_to(|_, value: u64| { // Converts the u64 time to formatted MM:SS.sss time to display
+            .transform_to(move |_, value: u64| { // Applys Starting time offset mode
                 Some(format_clock(value).to_value())
             })
             .build();
         store_data(list_item, &format!("binding-{}", property), binding); 
 
+        // When user enters new time into an entry the corresponding values in the videosegment will be updated
+        // Any affected values are also updated
         entry.connect_activate(glib::clone!(
             #[strong] property,
             #[weak(rename_to = entry)] entry,
@@ -672,7 +690,7 @@ fn add_column(column_view: &gtk::ColumnView, _model: &ListStore, title: &str, vi
                         // do name stuff here
                         println!("Change name not impletemented");
                     }
-                    prop if prop.starts_with("time-") => {
+                    prop if prop.starts_with("relative-time-") => {
                         println!("Changing {}", property);
                         let row_index = model.find(&video_segment).unwrap();
                         let valid_entry = validate_split_table_entry(&entry);
@@ -867,6 +885,70 @@ fn store_data<T: 'static>(widget: &impl ObjectExt, key: &str, value: T) {
 // Retrieves data from a widget given a key
 fn get_data<T: 'static>(widget: &impl ObjectExt, key: &str) -> Option<std::ptr::NonNull<T>> {
     unsafe { widget.data::<T>(key) }
+}
+
+fn build_start_time_offset_column(column_view: &gtk::ColumnView, start_time_offset_model: &ListStore, split_table_model: &ListStore, title: &str) {
+    let factory = gtk::SignalListItemFactory::new();
+    // Creates the entry objects
+    factory.connect_setup(move |_, list_item| {
+        let entry = gtk::Entry::new();
+        list_item.set_child(Some(&entry));
+    });
+
+    let start_time_offset_model_clone = start_time_offset_model.clone();
+    let split_table_model_clone = split_table_model.clone();
+    // Binds the stored data to the displayed entry objects
+    factory.connect_bind(move |_, list_item| {
+        let item = list_item.item().and_then(|obj| obj.downcast::<TimeEntry>().ok()).expect("The item is not a VideoSegment");
+        let entry = list_item.child().and_downcast::<Entry>().expect("The child widget is not entry");
+        // Binds the value in the time entry to the entry text field
+        // Any changes to the time entries value will be updated in the entry object
+        let binding = item.bind_property("time", &entry, "text")
+            .flags(glib::BindingFlags::DEFAULT | glib::BindingFlags::SYNC_CREATE)
+            .transform_to(|_, value: u64| { // Converts the u64 time to formatted MM:SS.sss time to display
+                Some(format_clock(value).to_value())
+            })
+            .build();
+
+        entry.connect_activate(glib::clone!(
+            #[weak(rename_to = start_time_offset_model)] start_time_offset_model_clone,
+            #[weak(rename_to = time_entry)] item,
+            #[weak(rename_to = entry)] entry,
+            #[weak(rename_to = split_table_model)] split_table_model_clone,
+            move |_| {
+                let valid_entry = validate_split_table_entry(&entry);
+                if !valid_entry {
+                    let time_entry_data = time_entry.get_time();
+                    entry.set_text(format_clock(time_entry_data).as_str());
+                } else {
+                    let new_time = string_to_nseconds(&entry.text().to_string()).unwrap();
+                    time_entry.set_time(new_time);
+                    let video_player_index = get_index_of(&start_time_offset_model, &time_entry).expect("Failed to get the index of the time entry for the start time offset model");
+                    for i in 0..split_table_model.n_items() {
+                        let video_segment = split_table_model.item(i).and_downcast::<VideoSegment>().unwrap();
+                        video_segment.set_offset(video_player_index as usize, new_time);
+
+                    }
+                    //update_times(&split_table_model, video_player_index, 0);
+                }
+            }
+        ));
+    });
+
+    let column = gtk::ColumnViewColumn::new(Some(title), Some(factory));
+    column_view.append_column(&column);
+}
+
+fn get_index_of<T: IsA<glib::Object>>(model: &gio::ListStore, obj: &T) -> Option<u32> {
+    for i in 0..model.n_items() {
+        let current = model.item(i).and_downcast::<T>();
+        if let Some(current) = current {
+            if current.as_ptr() == obj.as_ptr() {
+                return Some(i);
+            }
+        }
+    }
+    None
 }
 
 fn main() -> glib::ExitCode {

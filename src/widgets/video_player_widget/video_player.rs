@@ -470,8 +470,8 @@ impl VideoPlayer {
         Arc::downgrade(&imp.gstreamer_manager)
     }
 
-    pub fn connect_time_to_seekbar(&self, id: String, time_entry: Rc<TimeEntry>, color: &str) {
+    pub fn connect_time_to_seekbar(&self, id: String, time_entry: TimeEntry, color: &str) {
         let imp = imp::VideoPlayer::from_obj(self);
-        imp.seek_bar.add_mark(id, time_entry, color);
+        imp.seek_bar.add_mark(id, time_entry, color, TimeEntry::new(0));
     }
 }

@@ -18,7 +18,7 @@ mod imp {
     #[derive(CompositeTemplate, Default)] 
     #[template(resource = "/seekbar/seekbar.ui")]
     pub struct SeekBar {
-        pub marks: RefCell<HashMap<String, (Rc<TimeEntry>, gtk::Widget)>>,
+        pub marks: RefCell<HashMap<String, (TimeEntry, TimeEntry, gtk::Widget)>>,
         pub timeline_length: Rc<RefCell<u64>>,
         pub timeline_dirty_flag: RefCell<bool>,
         pub auto_length_from_marks: RefCell<bool>,
@@ -90,7 +90,7 @@ impl SeekBar {
     }
 
 
-    pub fn add_mark(&self, id: String, time_entry: Rc<TimeEntry>, color: &str) {
+    pub fn add_mark(&self, id: String, time_entry: TimeEntry, color: &str, offset: TimeEntry) {
         let imp = imp::SeekBar::from_obj(self);
         
         let mark = Label::new(None);
@@ -102,7 +102,8 @@ impl SeekBar {
         imp.fixed.put(&mark, 0.0, 0.0);
         //self.update_mark_position(&mark.clone().upcast(), &time_entry);
 
-        let entry_time = time_entry.get_time();
+        let entry_time = if time_entry.get_time() == u64::MAX { u64::MAX } else { time_entry.get_time() - offset.get_time()};
+
         if entry_time != u64::MAX && entry_time > *imp.timeline_length.borrow() && *imp.auto_length_from_marks.borrow() {
             *imp.timeline_dirty_flag.borrow_mut() = true;
         }
@@ -115,9 +116,10 @@ impl SeekBar {
             #[strong(rename_to = dirty_flag)] imp.timeline_dirty_flag,
             #[weak(rename_to = this)] self,
             #[strong(rename_to = auto_length)] imp.auto_length_from_marks,
+            #[strong(rename_to = offset)] offset,
             move |time_entry, _| {
-                let old_time = if time_entry.get_old_time() == u64::MAX { 0 } else { time_entry.get_old_time()};
-                let time = time_entry.get_time();
+                let old_time = if time_entry.get_old_time() == u64::MAX { 0 } else { time_entry.get_old_time() - offset.get_time()};
+                let time = time_entry.get_time() - offset.get_time();
                 let width = scale.width();
                 let widget_width = mark_clone.allocated_width();
                 
@@ -146,28 +148,23 @@ impl SeekBar {
             }
         ));
         
-        imp.marks.borrow_mut().insert(id.clone(), (time_entry, mark.clone().upcast()));
+        imp.marks.borrow_mut().insert(id.clone(), (time_entry, offset, mark.clone().upcast()));
     }
 
     pub fn remove_mark(&self, id: &str) {
         let imp = imp::SeekBar::from_obj(self);
-        if let Some((_, widget)) = imp.marks.borrow_mut().remove(id) {
+        if let Some((_, _, widget)) = imp.marks.borrow_mut().remove(id) {
             widget.unparent();
         }
     }
 
-    pub fn update_mark_time(&self, id: &str, new_time: u64) {
+    pub fn update_mark_positions(&self) {
         let imp = imp::SeekBar::from_obj(self);
-        if let Some((time_entry, _)) = imp.marks.borrow().get(id) {
-            time_entry.set_time(new_time);
-        }
-    }
-
-    fn update_mark_positions(&self) {
-        let imp = imp::SeekBar::from_obj(self);
-        for (time_entry, widget) in imp.marks.borrow().values() {
+        for (time_entry, offset, widget) in imp.marks.borrow().values() {
             let widget_width = widget.allocated_width();
-            let time = time_entry.get_time();
+            let time_ns = time_entry.get_time();
+            let offset_time = offset.get_time();
+            let time = time_entry.get_time() - offset.get_time();
             if *imp.timeline_length.borrow() == 0 {
                 return;
             }
@@ -208,17 +205,17 @@ impl SeekBar {
         *imp.timeline_length.borrow()
     }
 
-    fn update_timeline_length(&self) {
+    pub fn update_timeline_length(&self) {
         let imp = imp::SeekBar::from_obj(self);
         let largest_time = imp.marks
             .borrow()
             .values()
-            .filter_map(|(time_entry, _)| {
+            .filter_map(|(time_entry, offset, _)| {
                 let time = time_entry.get_time();
                 if time == u64::MAX {
                     Some(0)
                 } else {
-                    Some(time)
+                    Some(time - offset.get_time())
                 }
             })
             .max()

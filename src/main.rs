@@ -355,6 +355,7 @@ fn build_ui(app: &Application) -> Builder {
     let column_view_clone = column_view.clone();
     let video_container_clone = video_container.clone();
     let shared_seek_bar_clone = shared_seek_bar.clone();
+    let start_time_offset_model_clone = start_time_offset_model.clone();
     add_row_above_button.connect_clicked(move |_| {
         let selection_model = column_view_clone.model().and_downcast::<SingleSelection>().unwrap();
         if let Some(_selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
@@ -362,7 +363,7 @@ fn build_ui(app: &Application) -> Builder {
             insert_empty_row(&model_clone, selected_index, MAX_VIDEO_PLAYERS);
             connect_row_to_seekbar(&model_clone, &video_container_clone, selected_index);
             let video_player_count = *unsafe { get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() } as i32;
-            connect_row_to_shared_seekbar(&model_clone, &shared_seek_bar_clone, selected_index, video_player_count);
+            connect_row_to_shared_seekbar(&model_clone, &shared_seek_bar_clone, selected_index, video_player_count, &start_time_offset_model_clone);
         }
     });
 
@@ -370,6 +371,7 @@ fn build_ui(app: &Application) -> Builder {
     let column_view_clone = column_view.clone();
     let video_container_clone = video_container.clone();
     let shared_seek_bar_clone = shared_seek_bar.clone();
+    let start_time_offset_model_clone = start_time_offset_model.clone();
     add_row_below_button.connect_clicked(move |_| {
         let selection_model = column_view_clone.model().and_downcast::<SingleSelection>().unwrap();
         if let Some(_selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
@@ -377,13 +379,13 @@ fn build_ui(app: &Application) -> Builder {
             insert_empty_row(&model_clone, selected_index + 1, MAX_VIDEO_PLAYERS);
             connect_row_to_seekbar(&model_clone, &video_container_clone, selected_index + 1);
             let video_player_count = *unsafe { get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() } as i32;
-            connect_row_to_shared_seekbar(&model_clone, &shared_seek_bar_clone, selected_index + 1, video_player_count);
+            connect_row_to_shared_seekbar(&model_clone, &shared_seek_bar_clone, selected_index + 1, video_player_count, &start_time_offset_model_clone);
         }
     });
 
 
 
-    let button: Button = builder.object("new_video_player_button").expect("Failed to get button");
+    let new_video_player_button: Button = builder.object("new_video_player_button").expect("Failed to get button");
     let builder_clone = builder.clone();
     let column_view_clone = column_view.clone();
     let model_clone = model.clone();
@@ -393,7 +395,7 @@ fn build_ui(app: &Application) -> Builder {
     let shared_seek_bar_clone = shared_seek_bar.clone();
     
     // Adds new video player and new columns to split table
-    button.connect_clicked(move |_| {
+    new_video_player_button.connect_clicked(move |_| {
         let count = *unsafe{ get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() };
         let window: ApplicationWindow = builder_clone.object("main_window").expect("Failed to get main_window from UI file");
         
@@ -429,6 +431,7 @@ fn build_ui(app: &Application) -> Builder {
             None
         });
 
+        //DOESNT DO ANYTHING
         let shared_seek_bar_clone_clone = shared_seek_bar_clone.clone();
         new_player.connect_local("timeline-length-acquired",false, move |args| {
             let timeline_length: u64 = args[1].get().unwrap();
@@ -439,6 +442,10 @@ fn build_ui(app: &Application) -> Builder {
             }
             None
         });
+
+        // Adds start time offset entry text to start_time_offset liststore/columnview
+        let new_start_time_offset_time_entry = TimeEntry::new(0);
+        start_time_offset_model_clone.append(&new_start_time_offset_time_entry);
         
         // Adds two columns to split table for each new video player
         // Column 1: (Time) Split time -> time since the start of the clip
@@ -448,9 +455,14 @@ fn build_ui(app: &Application) -> Builder {
         add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), count, &format!("relative-time-{}", count));
         add_column(&column_view_clone, &model_clone_clone, name.to_string().as_str(), count, &format!("duration-{}", count));
 
-        // Adds start time offset entry text to start_time_offset liststore/columnview
-        let new_start_time_offset_time_entry = TimeEntry::new(0);
-        start_time_offset_model_clone.append(&new_start_time_offset_time_entry);
+        new_start_time_offset_time_entry.connect_notify_local(Some("time"), glib::clone!(
+            #[weak(rename_to = shared_seek_bar)] shared_seek_bar_clone,
+            move |_, _| {
+                shared_seek_bar.update_timeline_length();
+        }));
+
+
+
         
         // Updates formatting of the video players and adds the new video player to the container
         let number_of_columns = (count as u32 + 1).clamp(1,3);
@@ -464,7 +476,7 @@ fn build_ui(app: &Application) -> Builder {
 
         connect_column_to_seekbar(&model_clone_clone, &video_container_clone, video_player_index);
         let video_player_count = *unsafe { get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() } as i32;
-        connect_column_to_shared_seekbar(&model_clone, &shared_seek_bar_clone, video_player_index, video_player_count);
+        connect_column_to_shared_seekbar(&model_clone, &shared_seek_bar_clone, video_player_index, video_player_count, &start_time_offset_model_clone);
     });
 
     // Debug function to print the split data in liststore
@@ -838,27 +850,29 @@ fn connect_column_to_seekbar(model: &ListStore, video_container: &FlowBox, colum
     }
 }
 
-fn connect_row_to_shared_seekbar(model: &ListStore, seekbar: &SeekBar, row_index: u32, video_player_count: i32) {
+fn connect_row_to_shared_seekbar(model: &ListStore, seekbar: &SeekBar, row_index: u32, video_player_count: i32, start_time_offset_model: &ListStore) {
     let row = model.item(row_index).and_downcast::<VideoSegment>().unwrap();
     let row_count = model.n_items();
     let colors = vec!["red", "blue", "green", "black", "coral", "lavender"];
     for i in 0..video_player_count {
         let time = row.get_time_entry_copy(i as usize);
+        let offset = start_time_offset_model.item(i as u32).and_downcast::<TimeEntry>().unwrap();  
         // id should always be row_count regardless of if the row is inserted in the middle.
         // not sure if it will matter but this should give marks unique ids
         let row_id = row_count - 1; 
-        seekbar.add_mark(format!("video-{i}, row-{row_id}"), time, colors[i as usize]);
+        seekbar.add_mark(format!("video-{i}, row-{row_id}"), time, colors[i as usize], offset);
     }
 }
 
-fn connect_column_to_shared_seekbar(model: &ListStore, seekbar: &SeekBar, column_index: u32, video_player_count: i32) {
+fn connect_column_to_shared_seekbar(model: &ListStore, seekbar: &SeekBar, column_index: u32, video_player_count: i32, start_time_offset_model: &ListStore) {
     let row_count = model.n_items();
     let colors = vec!["red", "blue", "green", "black", "coral", "lavender"];
     for i in 0..row_count {
         let row = model.item(i).and_downcast::<VideoSegment>().unwrap();
         let time = row.get_time_entry_copy(column_index as usize);
+        let offset = start_time_offset_model.item((video_player_count as u32).saturating_sub(1)).and_downcast::<TimeEntry>().unwrap();
         // id are given in order as they have already been created
-        seekbar.add_mark(format!("video-{column_index}, seg-{i}"), time, colors[(video_player_count - 1) as usize]);
+        seekbar.add_mark(format!("video-{column_index}, seg-{i}"), time, colors[(video_player_count - 1) as usize], offset);
     }
 }
 
@@ -1029,53 +1043,7 @@ fn main() -> glib::ExitCode {
             load_css("src\\widgets\\main_window\\style.css");
 
             let main_box = Box::new(gtk::Orientation::Horizontal, 10);
-            // let (liststore, column_view) = test_create();
             
-            // liststore.insert(0, &VideoSegment::new("Hi"));
-            // liststore.insert(1, &VideoSegment::new("Woooo"));
-            
-            // for i in 0..2 {
-            //     let segment = liststore.item(i).and_downcast::<VideoSegment>().unwrap();
-            //     for _ in 0..3 {
-            //         segment.add_empty_test_segment();
-            //     }
-            // }
-
-            // test_column(&column_view, "Name", "name");
-            // for i in 0..6 {
-            //     test_column(&column_view, &format!("Time {}", i), &format!("time-{}", i));
-            //     test_column(&column_view, &format!("Duration {}", i), &format!("duration-{}", i));
-            // }
-            
-            
-
-            // let button = Button::new();
-            // button.set_label("edit random cell");
-
-            // let store_clone = liststore.clone();
-            // button.connect_clicked(move |_| {
-            //     let row = random_int_range(0, 2);
-            //     let column = random_int_range(1, 13);
-            //     let value = random_int_range(0, i32::MAX) as u64;
-            //     let segment = store_clone.item(row as u32).and_downcast::<VideoSegment>().unwrap();
-            //     let prop_name = match (column - 1) % 2 {
-            //         0 => {
-            //             let n = (column - 1) / 2;
-            //             format!("time-{}", n)
-            //         }
-            //         1 => {
-            //             let n = (column - 1) / 2;
-            //             format!("duration-{}", n)
-            //         }
-            //         _ => unimplemented!()
-            //     };
-            //     segment.set_property(&prop_name, value);
-            //     println!("Changed Row: {row}, Column: {column}, to {value}");
-            // });
-
-            // main_box.append(&column_view);
-            // main_box.append(&button);
-
             window.set_child(Some(&main_box));
             window.show();
         });
@@ -1118,47 +1086,7 @@ fn main() -> glib::ExitCode {
             load_css("src\\widgets\\main_window\\style.css");
             
             let main_box = Box::new(gtk::Orientation::Horizontal, 10);
-            let timeline_length = 1000000 as u64;
-            let seekbar = SeekBar::new(timeline_length, false);
-            let time = TimeEntry::new(0);
-            let time_rc = std::rc::Rc::new(time);
-            let time_rc_clone = time_rc.clone();
-            seekbar.add_mark("1".to_string(), time_rc_clone, "black");
-
-            let time_rc_clone = time_rc.clone();
-            timeout_add_local(Duration::from_secs(1), move || {
-                let time_w = time_rc_clone.get_time();
-                time_rc_clone.set_time(time_w + 100000);
-                glib::ControlFlow::Continue
-            });
-            // let new_box = Box::new(gtk::Orientation::Horizontal, 10);
-            // let overlay_object = gtk::Overlay::new();
-            // let fixed_object = gtk::Fixed::new();
-            // fixed_object.set_receives_default(false);
-            // fixed_object.set_can_target(false);
-            // overlay_object.set_hexpand(true);
             
-            // let scale = gtk::Scale::new(gtk::Orientation::Horizontal, Some(&Adjustment::new(0.0, 1.0, 100.0, 1.0, 0.0, 0.0)));
-            // scale.set_hexpand(true);
-
-            // overlay_object.add_overlay(&scale);
-            // overlay_object.add_overlay(&fixed_object);
-
-            // let mark = gtk::Label::new(Some("^"));
-
-            // fixed_object.put(&mark, 0.0, 300.0);
-
-            // new_box.append(&overlay_object);
-            main_box.append(&seekbar);
-
-
-            // //main_box.set_halign(gtk::Align::Fill);
-            // let length: u64 = 10000000000;
-            // let width = main_box.width();
-            // let height = 50;
-            // let sb = SeekBar::new(length, width, height);
-            // main_box.append(&sb);
-
             window.set_child(Some(&main_box));
             window.show();
         });

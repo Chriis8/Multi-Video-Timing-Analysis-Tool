@@ -18,9 +18,9 @@ mod imp {
     
     #[derive(Clone)]
     pub struct Segment {
-        pub time: Rc<TimeEntry>,
+        pub time: TimeEntry,
         pub duration: Option<u64>,
-        pub offset: RefCell<u64>,
+        pub offset: TimeEntry,
     }
 
     #[derive(Default)]
@@ -114,18 +114,18 @@ mod imp {
                 n if n.starts_with("offset-") => {
                     let i = n["offset-".len()..].parse::<usize>().unwrap();
                     let segments_ref = self.segments.borrow();
-                    let offset = segments_ref[i].offset.borrow();
-                    offset.to_value()
+                    let offset = &segments_ref[i].offset;
+                    offset.get_time().to_value()
                 }
                 n if n.starts_with("relative-time-") => {
                     let i = n["relative-time-".len()..].parse::<usize>().unwrap();
                     let segments_ref = self.segments.borrow();
-                    let offset = segments_ref[i].offset.borrow();
+                    let offset = segments_ref[i].offset.get_time();
                     let time = self.segments.borrow()[i].time.get_time();
                     if time == u64::MAX {
                         return time.to_value();
                     } else {
-                        return time.saturating_sub(*offset).to_value();
+                        return time.saturating_sub(offset).to_value();
                     }
                 }
                 _ => unimplemented!()
@@ -165,7 +165,7 @@ mod imp {
                     let segments = &mut self.segments.borrow_mut();
                     if i < segments.len() {
                         let raw = value.get::<u64>().unwrap_or_default();
-                        segments[i].offset = raw.into();
+                        segments[i].offset.set_time(raw);
                         self.notify(pspec);
                         self.notify_time_relative(i);
                     }
@@ -216,9 +216,9 @@ impl VideoSegment {
     pub fn add_empty_segment(&self) -> Segment {
         let imp = imp::VideoSegment::from_obj(self);
         let new_segment = Segment {
-            time: Rc::new(TimeEntry::new(u64::MAX)),
+            time: TimeEntry::new(u64::MAX),
             duration: None,
-            offset: 0.into(),
+            offset: TimeEntry::new(0),
         };
         imp.segments.borrow_mut().push(new_segment.clone());
         new_segment
@@ -233,7 +233,7 @@ impl VideoSegment {
         self.set_property(&format!("duration-{}", video_player_index), duration);
     }
 
-    pub fn get_time_entry_copy(&self, video_player_index: usize) -> Rc<TimeEntry> {
+    pub fn get_time_entry_copy(&self, video_player_index: usize) -> TimeEntry {
         let imp = imp::VideoSegment::from_obj(self);
         let time_entry = imp.segments.borrow()[video_player_index].time.clone();
         time_entry

@@ -89,8 +89,8 @@
                         </child>
 
                         <child>
-                            <object class="GtkButton" id="test_button">
-                                <property name="label">Test</property>
+                            <object class="GtkButton" id="set_start_time_button">
+                                <property name="label">Set Start Time</property>
                             </object>
                         </child>
 

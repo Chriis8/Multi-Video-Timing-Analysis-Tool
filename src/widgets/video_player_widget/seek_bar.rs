@@ -121,7 +121,7 @@ impl SeekBar {
                 let old_time = if time_entry.get_old_time() == u64::MAX { 0 } else { time_entry.get_old_time() - offset.get_time()};
                 let time = time_entry.get_time() - offset.get_time();
                 let width = scale.width();
-                let widget_width = mark_clone.allocated_width();
+                let timeline_lengt = *timeline_length.borrow();
                 
                 if (old_time == *timeline_length.borrow() || time > *timeline_length.borrow()) && *auto_length.borrow() {
                     *dirty_flag.borrow_mut() = true;
@@ -129,18 +129,18 @@ impl SeekBar {
                 if *dirty_flag.borrow() {
                     this.update_timeline_length();
                 }
-
+                
                 if *timeline_length.borrow() == 0 {
                     eprintln!("Timeline_length is still 0");
                     return;
                 }
                 if time == u64::MAX {
                     mark_clone.set_visible(false);
-                    let percent = 0.0;
-                    let x = percent * (width - 4) as f64;
-                    fixed_overlay.move_(&mark_clone, x - (widget_width as f64 / 2.0) + 2.0, 25.0);
+                    fixed_overlay.move_(&mark_clone, 0.0, 25.0);
                 } else {
                     mark_clone.set_visible(true);
+                    let (_min, natural, _min_b, _nat_b) = mark_clone.measure(gtk::Orientation::Horizontal, -1);
+                    let widget_width = natural;
                     let percent = time as f64 / *timeline_length.borrow() as f64;
                     let x = percent * (width - 4) as f64;
                     fixed_overlay.move_(&mark_clone, x - (widget_width as f64 / 2.0) + 2.0, 25.0);
@@ -161,20 +161,20 @@ impl SeekBar {
     pub fn update_mark_positions(&self) {
         let imp = imp::SeekBar::from_obj(self);
         for (time_entry, offset, widget) in imp.marks.borrow().values() {
-            let widget_width = widget.allocated_width();
             let time_ns = time_entry.get_time();
             let offset_time = offset.get_time();
             let time = time_entry.get_time() - offset.get_time();
+            let timeline_length = *imp.timeline_length.borrow();
             if *imp.timeline_length.borrow() == 0 {
                 return;
             }
             if time == u64::MAX {
                 widget.set_visible(false);
-                let percent = 0.0;
-                let x_pos = percent * (imp.scale.width() - 4) as f64;
-                imp.fixed.move_(widget, x_pos - (widget_width as f64 / 2.0), 25.0);
+                imp.fixed.move_(widget, 0.0, 25.0);
             } else {
                 widget.set_visible(true);
+                let (_min, natural, _min_b, _nat_b) = widget.measure(gtk::Orientation::Horizontal, -1);
+                    let widget_width = natural;
                 let percent = time as f64 / *imp.timeline_length.borrow() as f64;
                 let x_pos = percent * (imp.scale.width() - 4) as f64;
                 imp.fixed.move_(widget, x_pos - (widget_width as f64 / 2.0), 25.0);

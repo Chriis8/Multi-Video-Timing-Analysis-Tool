@@ -77,7 +77,7 @@ mod imp {
         pub split_button: TemplateChild<Button>,
 
         #[template_child]
-        pub test_button: TemplateChild<Button>,
+        pub set_start_time_button: TemplateChild<Button>,
     }
     
     #[gtk::glib::object_subclass]
@@ -126,13 +126,17 @@ mod imp {
         fn signals() -> &'static [Signal] {
             // Setup split button signal
             static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
-                vec![Signal::builder("button-clicked")
+                vec![Signal::builder("split-button-clicked")
                     .flags(glib::SignalFlags::RUN_LAST)
                     .param_types([u32::static_type(), u64::static_type()])
                     .build(),
                     Signal::builder("timeline-length-acquired")
                     .flags(glib::SignalFlags::RUN_LAST)
                     .param_types([u64::static_type()])
+                    .build(),
+                    Signal::builder("set-start-button-clicked")
+                    .flags(glib::SignalFlags::RUN_LAST)
+                    .param_types([u32::static_type(), u64::static_type()])
                     .build(),
                     ]
                 });
@@ -450,7 +454,35 @@ impl VideoPlayer {
                 };
                 let nanos: &dyn ToValue = &pos.nseconds();
                 let id: &dyn ToValue = &imp.id.get();
-                this.emit_by_name::<()>("button_clicked", &[id, nanos]);
+                this.emit_by_name::<()>("split_button_clicked", &[id, nanos]);
+            }
+        ));
+
+        let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        imp.set_start_time_button.connect_clicked(glib::clone!(
+            #[strong] gstman_weak,
+            #[weak(rename_to = this)] self,
+            #[weak] imp,
+            move |_| {
+                let gstman = match gstman_weak.upgrade() {
+                    Some(val) => val, None => return,
+                };
+                let guard = match gstman.lock() {
+                    Ok(val) => val, Err(_) => return,
+                };
+                let ref mut pipeline = match &*guard {
+                    Some(val) => val, None => return,
+                };
+                let pos = match pipeline.get_position() {
+                    Some(time) => time,
+                    None => {
+                        eprintln!("Failed to get position trying to set the start time offset");
+                        return;
+                    }
+                };
+                let nanos: &dyn ToValue = &pos.nseconds();
+                let id: &dyn ToValue = &imp.id.get();
+                this.emit_by_name::<()>("set-start-button-clicked", &[id, nanos]);
             }
         ));
 

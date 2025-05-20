@@ -22,7 +22,6 @@ use std::rc::Rc;
 use gtk::prelude::GtkWindowExt;
 
 const MAX_VIDEO_PLAYERS: u32 = 6;
-const STARTING_TIME: u64 = 0;
 
 #[derive(Clone)]
 enum TimeDisplayMode {
@@ -419,7 +418,7 @@ fn build_ui(app: &Application) -> Builder {
         // Listens to the split button from a video player
         // args[1] ID u32: index from the video player thats button was pressed
         // args[2] Position u64: time in nano seconds that the video player playback head was at when the button was pressed
-        new_player.connect_local("button-clicked", false, move |args| {
+        new_player.connect_local("split-button-clicked", false, move |args| {
             let video_player_index: u32 = args[1].get().unwrap();
             let video_player_position: u64 = args[2].get().unwrap();
             // Sets the time for the selected row
@@ -435,6 +434,27 @@ fn build_ui(app: &Application) -> Builder {
             } else {
                 eprintln!("No segment selected");
             }
+            None
+        });
+
+        let start_time_offset_model_clone_clone = start_time_offset_model_clone.clone();
+        let model_clone_clone = model_clone.clone();
+        new_player.connect_local("set-start-button-clicked", false, move |args| {
+            let video_player_index: u32 = args[1].get().unwrap();
+            let video_player_position: u64 = args[2].get().unwrap();
+            let time_entry = start_time_offset_model_clone_clone.item(video_player_index).and_downcast::<TimeEntry>().unwrap();
+            time_entry.set_time(video_player_position);
+
+            for i in 0..model_clone_clone.n_items() {
+                let video_segment = model_clone_clone.item(i).and_downcast::<VideoSegment>().unwrap();
+                if i == 0 {
+                    let time = video_segment.get_time(video_player_index as usize).unwrap();
+                    video_segment.set_duration(video_player_index as usize, time.saturating_sub(video_player_position));
+                }
+
+                video_segment.set_offset(video_player_index as usize, video_player_position);
+            }
+
             None
         });
 
@@ -502,9 +522,16 @@ fn build_ui(app: &Application) -> Builder {
 // Updates durations to correctly match the set segment times
 fn update_durations(model: &ListStore, video_player_index: u32, starting_row_index: u32) {
     let number_of_rows = model.n_items();
+    if number_of_rows == 0 {
+        return;
+    }
+
     let mut previous_time: u64 = match get_previous_time(model, video_player_index, starting_row_index) {
         Some(time) => time,
-        None => STARTING_TIME,
+        None => {
+            let video_segment = model.item(0).and_downcast::<VideoSegment>().unwrap();
+            video_segment.get_offset(video_player_index as usize)
+        },
     };
     for i in starting_row_index..number_of_rows {
         let current_video_segment = model.item(i).and_downcast::<VideoSegment>().unwrap();
@@ -763,7 +790,7 @@ fn add_column(column_view: &gtk::ColumnView, _model: &ListStore, title: &str, vi
         // Any changes to the videosegment will be updated in the entry object
         let binding = item.bind_property(&property, &entry, "text")
             .flags(glib::BindingFlags::DEFAULT | glib::BindingFlags::SYNC_CREATE)
-            .transform_to(move |_, value: u64| { // Applys Starting time offset mode
+            .transform_to(move |_, value: u64| { 
                 Some(format_clock(value).to_value())
             })
             .build();

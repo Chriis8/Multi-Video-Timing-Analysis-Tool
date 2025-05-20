@@ -52,6 +52,22 @@ scale slider {
     background-image: none;
 }
 
+entry {
+    padding: 0px;
+    margin-left: 0px;
+    margin-right: 0px;
+    margin-top: 0px;
+    margin-bottom: 0px;
+}
+
+columnview.data-table {
+    padding: 0px;
+    margin-left: 0px;
+    margin-right: 0px;
+    margin-top: 0px;
+    margin-bottom: 0px;
+}
+
 .seek-bar-scale {
     padding-left: 16px;
     padding-right: 16px;

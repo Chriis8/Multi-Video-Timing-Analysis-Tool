@@ -6,9 +6,10 @@ use gio::ListStore;
 use glib::property::PropertyGet;
 use glib::{timeout_add_local};
 use glib::{random_int_range, ExitCode, prelude::ObjectExt, Regex, RegexCompileFlags, RegexMatchFlags};
+use gstreamer::prelude::WindowsBusExtManual;
 use gstreamer::{Clock, ClockTime};
 use gtk::subclass::fixed;
-use gtk::{Adjustment, ColumnViewColumn, EventControllerFocus, FlowBox, FlowBoxChild, ListItem, SelectionMode, SingleSelection};
+use gtk::{Adjustment, ColumnViewColumn, EventControllerFocus, FlowBox, FlowBoxChild, ListItem, SelectionMode, SingleSelection, Window};
 use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button, ColumnView, CssProvider, Entry, Label};
 use gstgtk4;
 mod widgets;
@@ -18,6 +19,7 @@ use widgets::split_panel::splits::VideoSegment;
 use widgets::split_panel::timeentry::TimeEntry;
 use std::sync::{Arc, Mutex};
 use std::rc::Rc;
+use gtk::prelude::GtkWindowExt;
 
 const MAX_VIDEO_PLAYERS: u32 = 6;
 const STARTING_TIME: u64 = 0;
@@ -77,6 +79,10 @@ fn build_ui(app: &Application) -> Builder {
     video_container.set_column_spacing(0);
     
     let (model, column_view) = create_column_view::<VideoSegment>();
+    column_view.set_reorderable(false);
+    column_view.set_show_column_separators(true);
+    column_view.set_show_row_separators(true);
+    column_view.add_css_class("data-table");
     column_view_container.append(&column_view);
 
     let (start_time_offset_model, start_time_offset_column_view) = create_column_view::<TimeEntry>();
@@ -338,7 +344,10 @@ fn build_ui(app: &Application) -> Builder {
     shared_seek_bar.set_can_target(false);
     shared_seek_bar.set_can_focus(false);
     shared_seek_bar_container.append(&shared_seek_bar);
-
+    
+    // Adds an initial row
+    add_empty_row_with_columns(&model, MAX_VIDEO_PLAYERS);
+    
     // Adds first row of segment names to the split table
     let column_view_clone = column_view.clone();
     add_name_column(&column_view_clone, "Segment Name");
@@ -347,8 +356,6 @@ fn build_ui(app: &Application) -> Builder {
     let initial_child_count = 0_usize;
     store_data(&video_container, "count", initial_child_count);
 
-    // Adds an initial row
-    add_empty_row_with_columns(&model, MAX_VIDEO_PLAYERS);
     
     
     let model_clone = model.clone();
@@ -667,14 +674,87 @@ fn create_column_view<T: 'static + IsA<glib::Object>>() -> (ListStore, ColumnVie
 // Each video player gets two columns one for time and one for duration
 fn add_column(column_view: &gtk::ColumnView, _model: &ListStore, title: &str, video_player_index: usize, prop_name: &str) {
     let factory = gtk::SignalListItemFactory::new();
+    
+    let model_clone = _model.clone();
+    let property = prop_name.to_string();
+    let column_view_clone = column_view.clone();
     // Creates the entry objects
     factory.connect_setup(move |_, list_item| {
         let entry = gtk::Entry::new();
+        entry.add_css_class("flat");
+        entry.set_hexpand(true);
+        entry.set_halign(gtk::Align::Fill);
+        // When user enters new time into an entry the corresponding values in the videosegment will be updated
+        // Any affected values are also updated
+        entry.connect_activate(glib::clone!(
+            #[strong] property,
+            #[weak(rename_to = entry)] entry,
+            #[weak(rename_to = list_item)] list_item,
+            #[weak(rename_to = model)] model_clone,
+            move |_| {
+                if let Some(video_segment) = list_item.item().and_downcast::<VideoSegment>() {
+                    match &property {
+                        prop if prop.starts_with("name") => {
+                            // do name stuff here
+                            println!("Change name not impletemented");
+                        }
+                        prop if prop.starts_with("relative-time-") => {
+                            println!("Changing {}", property);
+                            let row_index = model.find(&video_segment).unwrap();
+                            let valid_entry = validate_split_table_entry(&entry);
+                            if !valid_entry { // Restores segment data if invalid entry
+                                let stored_entry_data = video_segment.property(property.as_str());
+                                entry.set_text(format_clock(stored_entry_data).as_str());
+                            } else { // updates segment data with new entry and fixes any conflicts
+                                let new_time = string_to_nseconds(&entry.text().to_string()).unwrap();
+                                video_segment.set_time(video_player_index, new_time);
+                                correct_conflicts(&model, video_player_index as u32, row_index);
+                            }
+                        }
+                        prop if prop.starts_with("duration-") => {
+                            println!("Changing {}", property);
+                            let row_index = model.find(&video_segment).unwrap();
+                            let valid_entry = validate_split_table_entry(&entry);
+                            if !valid_entry {// Restores segment data if invalid entry
+                                let stored_entry_data = video_segment.property(property.as_str());
+                                entry.set_text(format_clock(stored_entry_data).as_str());
+                            } else { // updates segment data with new entry and fixes any conflicts
+                                let new_duration = string_to_nseconds(&entry.text().to_string()).unwrap();
+                                video_segment.set_duration(video_player_index, new_duration);
+                                let previous_time: u64 = match get_previous_time(&model, video_player_index as u32, row_index) {
+                                    Some(time) => time,
+                                    None => 0,
+                                };
+                                video_segment.set_time(video_player_index, previous_time + new_duration);
+                                correct_conflicts(&model, video_player_index as u32, row_index);
+                            }
+                        }
+                        _ => {
+                            eprintln!("Invalid property: {}", property);
+                        }
+                    }
+                }
+            }
+        ));
+    
+        entry.connect_has_focus_notify(glib::clone!(
+            #[weak(rename_to = model)] model_clone,
+            #[weak(rename_to = column_view)] column_view_clone,
+            #[weak(rename_to = list_item)] list_item,
+            move |_| {
+                if let Some(video_segment) = list_item.item().and_downcast::<VideoSegment>() {
+                    let row_index = model.find(&video_segment).unwrap_or(u32::MAX);
+                    if row_index != u32::MAX {
+                        let selection_model = column_view.model().and_downcast::<SingleSelection>().unwrap();
+                        selection_model.select_item(row_index, true);
+                    }
+                }
+            }
+        ));
         list_item.set_child(Some(&entry));
     });
 
     // Binds the stored data to the displayed entry objects
-    let model_clone = _model.clone();
     let property = prop_name.to_string();
     factory.connect_bind(move |_, list_item| {
         let item = list_item.item().and_then(|obj| obj.downcast::<VideoSegment>().ok()).expect("The item is not a VideoSegment");
@@ -688,57 +768,6 @@ fn add_column(column_view: &gtk::ColumnView, _model: &ListStore, title: &str, vi
             })
             .build();
         store_data(list_item, &format!("binding-{}", property), binding); 
-
-        // When user enters new time into an entry the corresponding values in the videosegment will be updated
-        // Any affected values are also updated
-        entry.connect_activate(glib::clone!(
-            #[strong] property,
-            #[weak(rename_to = entry)] entry,
-            #[weak(rename_to = video_segment)] item,
-            #[weak(rename_to = model)] model_clone,
-            move |_| {
-                match &property {
-                    prop if prop.starts_with("name") => {
-                        // do name stuff here
-                        println!("Change name not impletemented");
-                    }
-                    prop if prop.starts_with("relative-time-") => {
-                        println!("Changing {}", property);
-                        let row_index = model.find(&video_segment).unwrap();
-                        let valid_entry = validate_split_table_entry(&entry);
-                        if !valid_entry { // Restores segment data if invalid entry
-                            let stored_entry_data = video_segment.property(property.as_str());
-                            entry.set_text(format_clock(stored_entry_data).as_str());
-                        } else { // updates segment data with new entry and fixes any conflicts
-                            let new_time = string_to_nseconds(&entry.text().to_string()).unwrap();
-                            video_segment.set_time(video_player_index, new_time);
-                            correct_conflicts(&model, video_player_index as u32, row_index);
-                        }
-                    }
-                    prop if prop.starts_with("duration-") => {
-                        println!("Changing {}", property);
-                        let row_index = model.find(&video_segment).unwrap();
-                        let valid_entry = validate_split_table_entry(&entry);
-                        if !valid_entry {// Restores segment data if invalid entry
-                            let stored_entry_data = video_segment.property(property.as_str());
-                            entry.set_text(format_clock(stored_entry_data).as_str());
-                        } else { // updates segment data with new entry and fixes any conflicts
-                            let new_duration = string_to_nseconds(&entry.text().to_string()).unwrap();
-                            video_segment.set_duration(video_player_index, new_duration);
-                            let previous_time: u64 = match get_previous_time(&model, video_player_index as u32, row_index) {
-                                Some(time) => time,
-                                None => 0,
-                            };
-                            video_segment.set_time(video_player_index, previous_time + new_duration);
-                            correct_conflicts(&model, video_player_index as u32, row_index);
-                        }
-                    }
-                    _ => {
-                        eprintln!("Invalid property: {}", property);
-                    }
-                }
-            }
-        ));
     });
 
     let column = gtk::ColumnViewColumn::new(Some(title), Some(factory));
@@ -760,30 +789,52 @@ fn validate_split_table_entry(entry: &Entry) -> bool {
 // Adds column for segment names
 fn add_name_column(column_view: &gtk::ColumnView, title: &str) {
     let factory = gtk::SignalListItemFactory::new();
-    
+    let column_view_clone = column_view.clone();
     // Creates the entry objects
-    factory.connect_setup(|_factory, list_item: &ListItem| {
+    factory.connect_setup(move |_factory, list_item: &ListItem| {
         let entry = Entry::new();
+        entry.add_css_class("flat");
+        entry.set_hexpand(true);
+        entry.set_halign(gtk::Align::Fill);
+        
+        // Updates segment name from user input
+        entry.connect_activate(glib::clone!(
+            #[weak(rename_to = list_item)] list_item,
+            move |entry| {
+                if let Some(video_segment) = list_item.item().and_downcast::<VideoSegment>() {
+                    let new_name = entry.text().to_string();
+                    video_segment.set_name(new_name);
+                }
+            } 
+        ));
+    
+        entry.connect_has_focus_notify(glib::clone!(
+            #[weak(rename_to = column_view)] column_view_clone,
+            #[weak(rename_to = list_item)] list_item,
+            move |_| {
+                if let Some(video_segment) = list_item.item().and_downcast::<VideoSegment>() {
+                    println!("Changed focus");
+                    let selection_model = column_view.model().and_downcast::<SingleSelection>().unwrap();
+                    let model = selection_model.model().and_downcast::<ListStore>().unwrap();
+                    let row_index = model.find(&video_segment).unwrap_or(u32::MAX);
+                    if row_index != u32::MAX {
+                        selection_model.select_item(row_index, true);
+                    }
+                }
+            }
+        ));
         list_item.set_child(Some(&entry));
     });
     
     // Binds the stored data to the displayed entry objects
-    factory.connect_bind(|_factory, list_item: &ListItem| {
+    factory.connect_bind(move |_factory, list_item: &ListItem| {
         let entry = list_item.child().unwrap().downcast::<Entry>().expect("The child is not an Entry");
         let item = list_item.item();
         let video_segment = item.and_downcast_ref::<VideoSegment>().expect("Item is not a VideoSegment");
         let current_name = video_segment.get_name();
         entry.set_text(&current_name);
-        
-        // Updates segment name from user input
-        entry.connect_changed(glib::clone!(
-            #[weak(rename_to = seg)] video_segment,
-            move |entry| {
-                let new_name = entry.text().to_string();
-                seg.set_name(new_name);
-            } 
-        ));
     });
+
     
     // Adds the new column to column view
     let new_column = gtk::ColumnViewColumn::new(Some(title), Some(factory));
@@ -903,14 +954,43 @@ fn get_data<T: 'static>(widget: &impl ObjectExt, key: &str) -> Option<std::ptr::
 
 fn build_start_time_offset_column(column_view: &gtk::ColumnView, start_time_offset_model: &ListStore, split_table_model: &ListStore, title: &str) {
     let factory = gtk::SignalListItemFactory::new();
+    let start_time_offset_model_clone = start_time_offset_model.clone();
+    let split_table_model_clone = split_table_model.clone();
     // Creates the entry objects
     factory.connect_setup(move |_, list_item| {
         let entry = gtk::Entry::new();
+        entry.add_css_class("flat");
+        entry.set_hexpand(true);
+        entry.set_halign(gtk::Align::Fill);
+
+        entry.connect_activate(glib::clone!(
+            #[weak(rename_to = start_time_offset_model)] start_time_offset_model_clone,
+            #[weak(rename_to = list_item)] list_item,
+            #[weak(rename_to = entry)] entry,
+            #[weak(rename_to = split_table_model)] split_table_model_clone,
+            move |_| {
+                if let Some(time_entry) = list_item.item().and_downcast::<TimeEntry>() {
+                    let valid_entry = validate_split_table_entry(&entry);
+                    if !valid_entry {
+                        let time_entry_data = time_entry.get_time();
+                        entry.set_text(format_clock(time_entry_data).as_str());
+                    } else {
+                        let new_time = string_to_nseconds(&entry.text().to_string()).unwrap();
+                        time_entry.set_time(new_time);
+                        let video_player_index = start_time_offset_model.find(&time_entry).unwrap();
+                        for i in 0..split_table_model.n_items() {
+                            let video_segment = split_table_model.item(i).and_downcast::<VideoSegment>().unwrap();
+                            video_segment.set_offset(video_player_index as usize, new_time);
+        
+                        }
+                        //update_times(&split_table_model, video_player_index, 0);
+                    }
+                }
+            }
+        ));
         list_item.set_child(Some(&entry));
     });
 
-    let start_time_offset_model_clone = start_time_offset_model.clone();
-    let split_table_model_clone = split_table_model.clone();
     // Binds the stored data to the displayed entry objects
     factory.connect_bind(move |_, list_item| {
         let item = list_item.item().and_then(|obj| obj.downcast::<TimeEntry>().ok()).expect("The item is not a VideoSegment");
@@ -924,45 +1004,10 @@ fn build_start_time_offset_column(column_view: &gtk::ColumnView, start_time_offs
             })
             .build();
 
-        entry.connect_activate(glib::clone!(
-            #[weak(rename_to = start_time_offset_model)] start_time_offset_model_clone,
-            #[weak(rename_to = time_entry)] item,
-            #[weak(rename_to = entry)] entry,
-            #[weak(rename_to = split_table_model)] split_table_model_clone,
-            move |_| {
-                let valid_entry = validate_split_table_entry(&entry);
-                if !valid_entry {
-                    let time_entry_data = time_entry.get_time();
-                    entry.set_text(format_clock(time_entry_data).as_str());
-                } else {
-                    let new_time = string_to_nseconds(&entry.text().to_string()).unwrap();
-                    time_entry.set_time(new_time);
-                    let video_player_index = get_index_of(&start_time_offset_model, &time_entry).expect("Failed to get the index of the time entry for the start time offset model");
-                    for i in 0..split_table_model.n_items() {
-                        let video_segment = split_table_model.item(i).and_downcast::<VideoSegment>().unwrap();
-                        video_segment.set_offset(video_player_index as usize, new_time);
-
-                    }
-                    //update_times(&split_table_model, video_player_index, 0);
-                }
-            }
-        ));
     });
 
     let column = gtk::ColumnViewColumn::new(Some(title), Some(factory));
     column_view.append_column(&column);
-}
-
-fn get_index_of<T: IsA<glib::Object>>(model: &gio::ListStore, obj: &T) -> Option<u32> {
-    for i in 0..model.n_items() {
-        let current = model.item(i).and_downcast::<T>();
-        if let Some(current) = current {
-            if current.as_ptr() == obj.as_ptr() {
-                return Some(i);
-            }
-        }
-    }
-    None
 }
 
 fn main() -> glib::ExitCode {

@@ -22,8 +22,6 @@ mod imp {
         pub timeline_length: Rc<RefCell<u64>>,
         pub timeline_dirty_flag: RefCell<bool>,
         pub auto_length_from_marks: RefCell<bool>,
-        pub updating_scale_width_timeout: RefCell<bool>,
-        pub last_width: Cell<i32>,
 
         #[template_child]
         pub scale: TemplateChild<Scale>,
@@ -70,24 +68,24 @@ impl SeekBar {
         let imp = imp::SeekBar::from_obj(&widget);
         *imp.timeline_length.borrow_mut() = timeline_length;
         *imp.auto_length_from_marks.borrow_mut() = auto_timeline_length_handling;
-        *imp.updating_scale_width_timeout.borrow_mut() = false;
         widget
     }
 
-    pub fn add_tick_callback_timeout(&self) {
-        let self_weak = self.downgrade();
-        let source_id = glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-            if let Some(this) = self_weak.upgrade(){
-                let imp = this.imp();
-                let current_width = imp.scale.allocation().width();
-                if imp.last_width.get() != current_width {
-                    imp.last_width.set(current_width);
-                    this.update_mark_positions();
-                }
-            }
-            glib::ControlFlow::Continue
-        });
-    }
+    //Honestly don't know what this was even for like ???????
+    // pub fn add_tick_callback_timeout(&self) {
+    //     let self_weak = self.downgrade();
+    //     let source_id = glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+    //         if let Some(this) = self_weak.upgrade(){
+    //             let imp = this.imp();
+    //             let current_width = imp.scale.allocation().width();
+    //             if imp.last_width.get() != current_width {
+    //                 imp.last_width.set(current_width);
+    //                 this.update_mark_positions();
+    //             }
+    //         }
+    //         glib::ControlFlow::Continue
+    //     });
+    // }
 
 
     pub fn add_mark(&self, id: String, time_entry: TimeEntry, color: &str, offset: TimeEntry) {
@@ -121,7 +119,6 @@ impl SeekBar {
                 let old_time = if time_entry.get_old_time() == u64::MAX { 0 } else { time_entry.get_old_time() - offset.get_time()};
                 let time = time_entry.get_time() - offset.get_time();
                 let width = scale.width();
-                let timeline_lengt = *timeline_length.borrow();
                 
                 if (old_time == *timeline_length.borrow() || time > *timeline_length.borrow()) && *auto_length.borrow() {
                     *dirty_flag.borrow_mut() = true;
@@ -161,10 +158,7 @@ impl SeekBar {
     pub fn update_mark_positions(&self) {
         let imp = imp::SeekBar::from_obj(self);
         for (time_entry, offset, widget) in imp.marks.borrow().values() {
-            let time_ns = time_entry.get_time();
-            let offset_time = offset.get_time();
             let time = time_entry.get_time() - offset.get_time();
-            let timeline_length = *imp.timeline_length.borrow();
             if *imp.timeline_length.borrow() == 0 {
                 return;
             }

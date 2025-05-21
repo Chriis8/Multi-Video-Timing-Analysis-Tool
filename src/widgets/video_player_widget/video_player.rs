@@ -103,6 +103,16 @@ mod imp {
             let scale = self.seek_bar.get_scale();
             scale.set_adjustment(&adjustment);
         }
+
+        fn set_controls(&self, status: bool) {
+            self.seek_bar.set_sensitive(status);
+            self.next_frame_button.set_sensitive(status);
+            self.previous_frame_button.set_sensitive(status);
+            self.play_button.set_sensitive(status);
+            self.stop_button.set_sensitive(status);
+            self.set_start_time_button.set_sensitive(status);
+            self.split_button.set_sensitive(status);
+        }
     }
     
     impl ObjectImpl for VideoPlayer {
@@ -121,6 +131,7 @@ mod imp {
 
         fn constructed(&self) {
             self.setup_seek_bar();
+            self.set_controls(false);
         }
 
         fn signals() -> &'static [Signal] {
@@ -168,7 +179,8 @@ impl VideoPlayer {
 
         *imp.continue_timeout.borrow_mut() = false;
         imp.seek_bar.set_auto_timeline_length_handling(false);
-        imp.seek_bar.add_tick_callback_timeout();
+
+        //imp.seek_bar.add_tick_callback_timeout();
         imp.id.set(id);
 
         println!("created video player widget");
@@ -184,8 +196,8 @@ impl VideoPlayer {
         let is_dragging_clone = imp.is_dragging.clone();
         *imp.continue_timeout.borrow_mut() = true;
         let to_continue = imp.continue_timeout.clone();
-        // Sets up timeout to update the seekbar every 500 milliseconds
-        let source_id = timeout_add_local(Duration::from_millis(500), move || {
+        // Sets up timeout to update the seekbar every 100 milliseconds
+        let source_id = timeout_add_local(Duration::from_millis(100), move || {
             if !*to_continue.borrow() {
                 println!("breaking update scale timeout");
                 return glib::ControlFlow::Break
@@ -289,6 +301,7 @@ impl VideoPlayer {
             #[weak(rename_to = this)] self,
             #[weak(rename_to = seekbar)] imp.seek_bar,
             move |_| {
+                this.set_controls(false);
                 let videos_filter = gtk::FileFilter::new();
                 videos_filter.set_name(Some("Video Files"));
                 videos_filter.add_pattern("*.mp4");   // MP4 format
@@ -329,6 +342,7 @@ impl VideoPlayer {
                                             seekbar.set_timeline_length(timeline_length);
                                             let nanos: &dyn ToValue = &timeline_length;
                                             this.emit_by_name::<()>("timeline-length-acquired", &[nanos]);
+                                            this.set_controls(true);
                                         } else {
                                             eprintln!("No Video Pipeline available");
                                         }
@@ -505,5 +519,16 @@ impl VideoPlayer {
     pub fn connect_time_to_seekbar(&self, id: String, time_entry: TimeEntry, color: &str) {
         let imp = imp::VideoPlayer::from_obj(self);
         imp.seek_bar.add_mark(id, time_entry, color, TimeEntry::new(0));
+    }
+
+    pub fn set_controls(&self, status: bool) {
+        let imp = self.imp();
+        imp.seek_bar.set_sensitive(status);
+        imp.next_frame_button.set_sensitive(status);
+        imp.previous_frame_button.set_sensitive(status);
+        imp.play_button.set_sensitive(status);
+        imp.stop_button.set_sensitive(status);
+        imp.set_start_time_button.set_sensitive(status);
+        imp.split_button.set_sensitive(status);
     }
 }

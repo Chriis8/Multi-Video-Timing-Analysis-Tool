@@ -339,7 +339,7 @@ fn build_ui(app: &Application) -> Builder {
         "Start Time Offsets");
     
     let shared_seek_bar = SeekBar::new(0, true);
-    shared_seek_bar.add_tick_callback_timeout();
+    //shared_seek_bar.add_tick_callback_timeout();
     shared_seek_bar.set_can_target(false);
     shared_seek_bar.set_can_focus(false);
     shared_seek_bar_container.append(&shared_seek_bar);
@@ -403,6 +403,11 @@ fn build_ui(app: &Application) -> Builder {
     // Adds new video player and new columns to split table
     new_video_player_button.connect_clicked(move |_| {
         let count = *unsafe{ get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() };
+        if count as u32 == MAX_VIDEO_PLAYERS {
+            println!("Max video players reached");
+            return;
+        }
+
         let window: ApplicationWindow = builder_clone.object("main_window").expect("Failed to get main_window from UI file");
         
         // Sets up new video player

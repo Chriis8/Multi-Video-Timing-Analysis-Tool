@@ -22,6 +22,7 @@ mod imp {
         pub timeline_length: Rc<RefCell<u64>>,
         pub timeline_dirty_flag: RefCell<bool>,
         pub auto_length_from_marks: RefCell<bool>,
+        pub last_width: Cell<i32>,
 
         #[template_child]
         pub scale: TemplateChild<Scale>,
@@ -71,21 +72,20 @@ impl SeekBar {
         widget
     }
 
-    //Honestly don't know what this was even for like ???????
-    // pub fn add_tick_callback_timeout(&self) {
-    //     let self_weak = self.downgrade();
-    //     let source_id = glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-    //         if let Some(this) = self_weak.upgrade(){
-    //             let imp = this.imp();
-    //             let current_width = imp.scale.allocation().width();
-    //             if imp.last_width.get() != current_width {
-    //                 imp.last_width.set(current_width);
-    //                 this.update_mark_positions();
-    //             }
-    //         }
-    //         glib::ControlFlow::Continue
-    //     });
-    // }
+    pub fn update_marks_on_width_change_timeout(&self) {
+        let self_weak = self.downgrade();
+        let source_id = glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            if let Some(this) = self_weak.upgrade(){
+                let imp = this.imp();
+                let current_width = imp.scale.allocation().width();
+                if imp.last_width.get() != current_width {
+                    imp.last_width.set(current_width);
+                    this.update_mark_positions();
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+    }
 
 
     pub fn add_mark(&self, id: String, time_entry: TimeEntry, color: &str, offset: TimeEntry) {

@@ -17,7 +17,7 @@ mod imp {
     use gtk::{Box, Button, Label, Picture};
     use glib::subclass::Signal;
 
-    use crate::widgets::video_player_widget::seek_bar::SeekBar;
+    use crate::widgets::seek_bar::seek_bar::SeekBar;
 
     use super::*;
     
@@ -180,7 +180,7 @@ impl VideoPlayer {
         *imp.continue_timeout.borrow_mut() = false;
         imp.seek_bar.set_auto_timeline_length_handling(false);
 
-        //imp.seek_bar.add_tick_callback_timeout();
+        imp.seek_bar.update_marks_on_width_change_timeout();
         imp.id.set(id);
 
         println!("created video player widget");

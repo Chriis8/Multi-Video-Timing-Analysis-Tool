@@ -18,8 +18,13 @@ fn main() {
         "spanel.gresource");
 
     glib_build_tools::compile_resources(
-        &["src/widgets/video_player_widget"], 
-        "src/widgets/video_player_widget/seekbar.gresource.xml", 
+        &["src/widgets/seek_bar"], 
+        "src/widgets/seek_bar/seekbar.gresource.xml", 
         "seekbar.gresource");
+
+    glib_build_tools::compile_resources(
+        &["src/widgets/seek_bar"], 
+        "src/widgets/seek_bar/sharedseekbar.gresource.xml", 
+        "sharedseekbar.gresource");
     
 }

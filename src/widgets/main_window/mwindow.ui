@@ -131,7 +131,7 @@
                                 <property name="halign">fill</property>
                                 <property name="hexpand">true</property>
                                 <property name="orientation">vertical</property>
-                                <child>
+                                <!-- <child>
                                     <object class="GtkBox" id="shared_seek_bar_container">
                                         <style><class name="shared-seek-bar-container"></class></style>
                                         <property name="hexpand">true</property>
@@ -190,7 +190,7 @@
                                         </child>
 
                                     </object>
-                                </child>
+                                </child> -->
                             </object>
                         </child>
                     </object>

@@ -1,19 +1,15 @@
 mod video_pipeline;
-use std::sync::atomic::AtomicU64;
-use std::time::Duration;
-
 use gio::ListStore;
-use glib::property::PropertyGet;
 use glib::{timeout_add_local};
 use glib::{random_int_range, ExitCode, prelude::ObjectExt, Regex, RegexCompileFlags, RegexMatchFlags};
-use gstreamer::prelude::WindowsBusExtManual;
 use gstreamer::{Clock, ClockTime};
 use gtk::subclass::fixed;
 use gtk::{Adjustment, ColumnViewColumn, EventControllerFocus, FlowBox, FlowBoxChild, ListItem, SelectionMode, SingleSelection, Window};
 use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button, ColumnView, CssProvider, Entry, Label};
 use gstgtk4;
 mod widgets;
-use widgets::video_player_widget::seek_bar::{self, SeekBar};
+use widgets::seek_bar::seek_bar::{self, SeekBar};
+use widgets::seek_bar::shared_seek_bar::SharedSeekBar;
 use widgets::video_player_widget::video_player::{self, VideoPlayer};
 use widgets::split_panel::splits::VideoSegment;
 use widgets::split_panel::timeentry::TimeEntry;
@@ -62,15 +58,8 @@ fn build_ui(app: &Application) -> Builder {
     let video_container: FlowBox = builder.object("video_container").expect("Failed to get video_container from UI File");
     let add_row_above_button: Button = builder.object("add_row_above_button").expect("Failed to get add_row_above_button from UI File");
     let add_row_below_button: Button = builder.object("add_row_below_button").expect("Failed to get add_row_below_button from UI File");
-    let shared_seek_bar_container: Box = builder.object("shared_seek_bar_container").expect("Failed to get shared_seek_bar_container from UI File");
+    let bottom_vbox: Box = builder.object("bottom_vbox").expect("Failed to get bottom_vbox from UI File");
     let start_time_offset_container: Box = builder.object("start_time_offset_container").expect("Failed to get start_time_offset_container from UI File");
-
-    let shared_previous_segment_button: Button = builder.object("shared_previous_segment_button").expect("Failed to get shared_previous_segment_button from UI File");
-    let shared_previous_frame_button: Button = builder.object("shared_previous_frame_button").expect("Failed to get shared_previous_frame_button from UI File");
-    let shared_play_button: Button = builder.object("shared_play_button").expect("Failed to get shared_play_button from UI File");
-    let shared_next_frame_button: Button = builder.object("shared_next_frame_button").expect("Failed to get share_play_button from UI File");
-    let shared_next_segment_button: Button = builder.object("shared_next_segment_button").expect("Failed to get shared_next_segment_button from UI File");
-    let jump_to_segment_button: Button = builder.object("jump_to_segment_button").expect("Failed to get jump_to_segment_button from UI File");
     
     video_container.set_homogeneous(true);
     video_container.set_valign(gtk::Align::Fill);
@@ -87,249 +76,6 @@ fn build_ui(app: &Application) -> Builder {
     let (start_time_offset_model, start_time_offset_column_view) = create_column_view::<TimeEntry>();
     start_time_offset_container.append(&start_time_offset_column_view);
 
-    let video_container_clone = video_container.clone();
-    let column_view_clone = column_view.clone();
-    shared_previous_segment_button.connect_clicked(move |_| {
-        let selection_model = column_view_clone.model().and_downcast::<SingleSelection>().unwrap();
-        let selected_index = selection_model.selected();
-        let previous_index = selected_index.saturating_sub(1);
-        selection_model.set_selected(previous_index);
-        for (video_player_index, child) in flowbox_children(&video_container_clone).enumerate() {
-            let fb_child = match child.downcast_ref::<FlowBoxChild>() {
-                Some(c) => c,
-                None => continue,
-            };
-
-            let content = match fb_child.child() {
-                Some(c) => c,
-                None => continue,
-            };
-
-            let video_player = match content.downcast_ref::<VideoPlayer>() {
-                Some(vp) => vp,
-                None => continue,
-            };
-
-            let arc = match video_player.pipeline().upgrade() {
-                Some(a) => a,
-                None => {
-                    eprintln!("Shared jump to segment: Pipeline dropped");
-                    continue
-                }
-            };
-
-            let mut guard = match arc.lock() {
-                Ok(g) => g,
-                Err(_) => {
-                    eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
-                    continue
-                }
-            };
-
-            if let Some(pipeline) = guard.as_mut() {
-                if let Some(selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
-                    let time = selection.get_time(video_player_index).and_then(|nanos| Some(ClockTime::from_nseconds(nanos))).unwrap();
-                    if let Ok(result) = pipeline.seek_position(time) {
-                        println!("Shared pipeline seek for video player {video_player_index} to position {time}");
-                    }
-                }
-            } else {
-                eprintln!("No pipeline for index {video_player_index}");
-            }
-        }
-        println!("Pressed shared preivous segment button");
-    });
-
-    let video_container_clone = video_container.clone();
-    shared_previous_frame_button.connect_clicked(move |_| {
-        let mut child_opt = video_container_clone.first_child();
-
-        while let Some(child) = child_opt {
-            if let Some(fb_child) = child.downcast_ref::<FlowBoxChild>() {
-                if let Some(content) = fb_child.child() {
-                    if let Some(video_player) = content.downcast_ref::<VideoPlayer>() {
-                        let gstman_weak = video_player.pipeline();
-                        if let Some(gstman) = gstman_weak.upgrade() {
-                            if let Ok(mut guard) = gstman.lock() {
-                                if let Some(ref mut pipeline) = *guard {
-                                    pipeline.frame_backward();
-                                    
-                                } else {
-                                    eprintln!("No Video Pipeline available");
-                                }
-                            } else {
-                                eprintln!("Failed to aquire lock on Video pipeline");
-                            }
-                        }
-                    }
-                }
-            }
-            child_opt = child.next_sibling();
-        }
-        println!("Pressed shared previous frame button");
-    });
-
-    let video_container_clone = video_container.clone();
-    shared_play_button.connect_clicked(move |_| {
-        let mut child_opt = video_container_clone.first_child();
-
-        while let Some(child) = child_opt {
-            if let Some(fb_child) = child.downcast_ref::<FlowBoxChild>() {
-                if let Some(content) = fb_child.child() {
-                    if let Some(video_player) = content.downcast_ref::<VideoPlayer>() {
-                        let gstman_weak = video_player.pipeline();
-                        if let Some(gstman) = gstman_weak.upgrade() {
-                            if let Ok(mut guard) = gstman.lock() {
-                                if let Some(ref mut pipeline) = *guard {
-                                    pipeline.play_video();
-                                    
-                                } else {
-                                    eprintln!("No Video Pipeline available");
-                                }
-                            } else {
-                                eprintln!("Failed to aquire lock on Video pipeline");
-                            }
-                        }
-                    }
-                }
-            }
-            child_opt = child.next_sibling();
-        }
-        println!("Pressed shared play button");
-    });
-
-    let video_container_clone = video_container.clone();
-    shared_next_frame_button.connect_clicked(move |_| {
-        let mut child_opt = video_container_clone.first_child();
-
-        while let Some(child) = child_opt {
-            if let Some(fb_child) = child.downcast_ref::<FlowBoxChild>() {
-                if let Some(content) = fb_child.child() {
-                    if let Some(video_player) = content.downcast_ref::<VideoPlayer>() {
-                        let gstman_weak = video_player.pipeline();
-                        if let Some(gstman) = gstman_weak.upgrade() {
-                            if let Ok(mut guard) = gstman.lock() {
-                                if let Some(ref mut pipeline) = *guard {
-                                    pipeline.frame_forward();
-                                    
-                                } else {
-                                    eprintln!("No Video Pipeline available");
-                                }
-                            } else {
-                                eprintln!("Failed to aquire lock on Video pipeline");
-                            }
-                        }
-                    }
-                }
-            }
-            child_opt = child.next_sibling();
-        }
-        println!("Pressed shared next frame button");
-    });
-
-    let video_container_clone = video_container.clone();
-    let column_view_clone = column_view.clone();
-    shared_next_segment_button.connect_clicked(move |_| {
-        let selection_model = column_view_clone.model().and_downcast::<SingleSelection>().unwrap();
-        let selected_index = selection_model.selected();
-        let next_index = (selected_index + 1).clamp(0, selection_model.n_items() - 1);
-        selection_model.set_selected(next_index);
-        for (video_player_index, child) in flowbox_children(&video_container_clone).enumerate() {
-            let fb_child = match child.downcast_ref::<FlowBoxChild>() {
-                Some(c) => c,
-                None => continue,
-            };
-
-            let content = match fb_child.child() {
-                Some(c) => c,
-                None => continue,
-            };
-
-            let video_player = match content.downcast_ref::<VideoPlayer>() {
-                Some(vp) => vp,
-                None => continue,
-            };
-
-            let arc = match video_player.pipeline().upgrade() {
-                Some(a) => a,
-                None => {
-                    eprintln!("Shared jump to segment: Pipeline dropped");
-                    continue
-                }
-            };
-
-            let mut guard = match arc.lock() {
-                Ok(g) => g,
-                Err(_) => {
-                    eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
-                    continue
-                }
-            };
-
-            if let Some(pipeline) = guard.as_mut() {
-                if let Some(selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
-                    let time = selection.get_time(video_player_index).and_then(|nanos| Some(ClockTime::from_nseconds(nanos))).unwrap();
-                    if let Ok(result) = pipeline.seek_position(time) {
-                        println!("Shared pipeline seek for video player {video_player_index} to position {time}");
-                    }
-                }
-            } else {
-                eprintln!("No pipeline for index {video_player_index}");
-            }
-        }
-        println!("Pressed shared next segment button");
-    });
-
-    let video_container_clone = video_container.clone();
-    let column_view_clone = column_view.clone();
-    jump_to_segment_button.connect_clicked(move |_| {
-        for (video_player_index, child) in flowbox_children(&video_container_clone).enumerate() {
-            let fb_child = match child.downcast_ref::<FlowBoxChild>() {
-                Some(c) => c,
-                None => continue,
-            };
-
-            let content = match fb_child.child() {
-                Some(c) => c,
-                None => continue,
-            };
-
-            let video_player = match content.downcast_ref::<VideoPlayer>() {
-                Some(vp) => vp,
-                None => continue,
-            };
-
-            let arc = match video_player.pipeline().upgrade() {
-                Some(a) => a,
-                None => {
-                    eprintln!("Shared jump to segment: Pipeline dropped");
-                    continue
-                }
-            };
-
-            let mut guard = match arc.lock() {
-                Ok(g) => g,
-                Err(_) => {
-                    eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
-                    continue
-                }
-            };
-
-            if let Some(pipeline) = guard.as_mut() {
-                let selection_model = column_view_clone.model().and_downcast::<SingleSelection>().unwrap();
-                if let Some(selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
-                    let time = selection.get_time(video_player_index).and_then(|nanos| Some(ClockTime::from_nseconds(nanos))).unwrap();
-                    if let Ok(result) = pipeline.seek_position(time) {
-                        println!("Shared pipeline seek for video player {video_player_index} to position {time}");
-                    }
-                }
-            } else {
-                eprintln!("No pipeline for index {video_player_index}");
-            }
-        }
-        println!("Pressed jump to segment button");
-    });
-
     let start_time_offset_column_view_clone = start_time_offset_column_view.clone();
     let start_time_offset_model_clone = start_time_offset_model.clone();
     let split_table_model_clone = model.clone();
@@ -338,11 +84,9 @@ fn build_ui(app: &Application) -> Builder {
         &split_table_model_clone,
         "Start Time Offsets");
     
-    let shared_seek_bar = SeekBar::new(0, true);
-    //shared_seek_bar.add_tick_callback_timeout();
-    shared_seek_bar.set_can_target(false);
-    shared_seek_bar.set_can_focus(false);
-    shared_seek_bar_container.append(&shared_seek_bar);
+
+    let ssb = SharedSeekBar::new(&video_container, &column_view, &start_time_offset_model, &model);
+    bottom_vbox.append(&ssb);
     
     // Adds an initial row
     add_empty_row_with_columns(&model, MAX_VIDEO_PLAYERS);
@@ -354,14 +98,11 @@ fn build_ui(app: &Application) -> Builder {
     // Add data to video_container to keep track of the number of active videos
     let initial_child_count = 0_usize;
     store_data(&video_container, "count", initial_child_count);
-
-    
     
     let model_clone = model.clone();
     let column_view_clone = column_view.clone();
     let video_container_clone = video_container.clone();
-    let shared_seek_bar_clone = shared_seek_bar.clone();
-    let start_time_offset_model_clone = start_time_offset_model.clone();
+    let shared_seek_bar_clone = ssb.clone();
     add_row_above_button.connect_clicked(move |_| {
         let selection_model = column_view_clone.model().and_downcast::<SingleSelection>().unwrap();
         if let Some(_selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
@@ -369,15 +110,14 @@ fn build_ui(app: &Application) -> Builder {
             insert_empty_row(&model_clone, selected_index, MAX_VIDEO_PLAYERS);
             connect_row_to_seekbar(&model_clone, &video_container_clone, selected_index);
             let video_player_count = *unsafe { get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() } as i32;
-            connect_row_to_shared_seekbar(&model_clone, &shared_seek_bar_clone, selected_index, video_player_count, &start_time_offset_model_clone);
+            shared_seek_bar_clone.connect_row(selected_index, video_player_count as u32);
         }
     });
 
     let model_clone = model.clone();
     let column_view_clone = column_view.clone();
     let video_container_clone = video_container.clone();
-    let shared_seek_bar_clone = shared_seek_bar.clone();
-    let start_time_offset_model_clone = start_time_offset_model.clone();
+    let shared_seek_bar_clone = ssb.clone();
     add_row_below_button.connect_clicked(move |_| {
         let selection_model = column_view_clone.model().and_downcast::<SingleSelection>().unwrap();
         if let Some(_selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
@@ -385,7 +125,7 @@ fn build_ui(app: &Application) -> Builder {
             insert_empty_row(&model_clone, selected_index + 1, MAX_VIDEO_PLAYERS);
             connect_row_to_seekbar(&model_clone, &video_container_clone, selected_index + 1);
             let video_player_count = *unsafe { get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() } as i32;
-            connect_row_to_shared_seekbar(&model_clone, &shared_seek_bar_clone, selected_index + 1, video_player_count, &start_time_offset_model_clone);
+            shared_seek_bar_clone.connect_row(selected_index + 1, video_player_count as u32);
         }
     });
 
@@ -398,7 +138,8 @@ fn build_ui(app: &Application) -> Builder {
     let video_container_clone = video_container.clone();
     let start_time_offset_model_clone = start_time_offset_model.clone();
     
-    let shared_seek_bar_clone = shared_seek_bar.clone();
+    //let shared_seek_bar_clone = shared_seek_bar.clone();
+    let shared_seek_bar_clone = ssb.clone();
     
     // Adds new video player and new columns to split table
     new_video_player_button.connect_clicked(move |_| {
@@ -416,10 +157,6 @@ fn build_ui(app: &Application) -> Builder {
         
         let model_clone_clone = model_clone.clone();
         let column_view_clone_clone = column_view_clone.clone();
-        
-        //let shared_seek_bar_clone_clone = shared_seek_bar_clone.clone();
-        
-        
         // Listens to the split button from a video player
         // args[1] ID u32: index from the video player thats button was pressed
         // args[2] Position u64: time in nano seconds that the video player playback head was at when the button was pressed
@@ -459,19 +196,6 @@ fn build_ui(app: &Application) -> Builder {
 
                 video_segment.set_offset(video_player_index as usize, video_player_position);
             }
-
-            None
-        });
-
-        //DOESNT DO ANYTHING
-        let shared_seek_bar_clone_clone = shared_seek_bar_clone.clone();
-        new_player.connect_local("timeline-length-acquired",false, move |args| {
-            let timeline_length: u64 = args[1].get().unwrap();
-            let current_timeline_length = shared_seek_bar_clone_clone.get_timeline_length();
-            if timeline_length > current_timeline_length {
-                
-                //shared_seek_bar_clone_clone.set_timeline_length(timeline_length);
-            }
             None
         });
 
@@ -508,16 +232,8 @@ fn build_ui(app: &Application) -> Builder {
 
         connect_column_to_seekbar(&model_clone_clone, &video_container_clone, video_player_index);
         let video_player_count = *unsafe { get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() } as i32;
-        connect_column_to_shared_seekbar(&model_clone, &shared_seek_bar_clone, video_player_index, video_player_count, &start_time_offset_model_clone);
+        shared_seek_bar_clone.connect_column(video_player_index, video_player_count as u32);
     });
-
-    // Debug function to print the split data in liststore
-    // Used to make sure the split data is correctly being stored as this is separate from the displayed information in the table
-    // let button: Button = builder.object("print_splits_button").expect("Failed to get new split button");
-    // let model_clone = model.clone();
-    // button.connect_clicked(move |_| {
-    //     print_vec(&model_clone);
-    // });
 
     app.add_window(&window);
     window.show();
@@ -933,32 +649,6 @@ fn connect_column_to_seekbar(model: &ListStore, video_container: &FlowBox, colum
     }
 }
 
-fn connect_row_to_shared_seekbar(model: &ListStore, seekbar: &SeekBar, row_index: u32, video_player_count: i32, start_time_offset_model: &ListStore) {
-    let row = model.item(row_index).and_downcast::<VideoSegment>().unwrap();
-    let row_count = model.n_items();
-    let colors = vec!["red", "blue", "green", "black", "coral", "lavender"];
-    for i in 0..video_player_count {
-        let time = row.get_time_entry_copy(i as usize);
-        let offset = start_time_offset_model.item(i as u32).and_downcast::<TimeEntry>().unwrap();  
-        // id should always be row_count regardless of if the row is inserted in the middle.
-        // not sure if it will matter but this should give marks unique ids
-        let row_id = row_count - 1; 
-        seekbar.add_mark(format!("video-{i}, row-{row_id}"), time, colors[i as usize], offset);
-    }
-}
-
-fn connect_column_to_shared_seekbar(model: &ListStore, seekbar: &SeekBar, column_index: u32, video_player_count: i32, start_time_offset_model: &ListStore) {
-    let row_count = model.n_items();
-    let colors = vec!["red", "blue", "green", "black", "coral", "lavender"];
-    for i in 0..row_count {
-        let row = model.item(i).and_downcast::<VideoSegment>().unwrap();
-        let time = row.get_time_entry_copy(column_index as usize);
-        let offset = start_time_offset_model.item((video_player_count as u32).saturating_sub(1)).and_downcast::<TimeEntry>().unwrap();
-        // id are given in order as they have already been created
-        seekbar.add_mark(format!("video-{column_index}, seg-{i}"), time, colors[(video_player_count - 1) as usize], offset);
-    }
-}
-
 fn remove_row(model: &gio::ListStore, row_index: u32) {
     if model.n_items() == 0 {
         eprintln!("No row to remove");
@@ -1053,16 +743,19 @@ fn main() -> glib::ExitCode {
         gstgtk4::plugin_register_static().expect("Failed to register gstgtk4 plugin");
 
         gio::resources_register_include!("vplayer.gresource")
-            .expect("Failed to register resources.");
+            .expect("Failed to register video player resource.");
 
         gio::resources_register_include!("mwindow.gresource")
-            .expect("Failed to register resources.");
+            .expect("Failed to register main window resource.");
 
         gio::resources_register_include!("spanel.gresource")
-            .expect("Failed to register resources.");
+            .expect("Failed to register split planel resource.");
 
         gio::resources_register_include!("seekbar.gresource")
-            .expect("Failed to register resources.");
+            .expect("Failed to register seek bar resource.");
+
+        gio::resources_register_include!("sharedseekbar.gresource")
+            .expect("Failed to register shared seek bar resource.");
         
         let app = gtk::Application::new(None::<&str>, gtk::gio::ApplicationFlags::FLAGS_NONE);
         app.connect_activate(|app| {
@@ -1132,50 +825,6 @@ fn main() -> glib::ExitCode {
             gstreamer::deinit();
         }
         return res
-    } else if run_app == 2 {
-        gstreamer::init().unwrap();
-        gtk::init().unwrap();
-
-        std::env::set_var("GTK_THEME", "Adwaita:dark");
-
-        gstgtk4::plugin_register_static().expect("Failed to register gstgtk4 plugin");
-
-        gio::resources_register_include!("vplayer.gresource")
-            .expect("Failed to register resources.");
-
-        gio::resources_register_include!("mwindow.gresource")
-            .expect("Failed to register resources.");
-
-        gio::resources_register_include!("spanel.gresource")
-            .expect("Failed to register resources.");
-
-        gio::resources_register_include!("seekbar.gresource")
-            .expect("Failed to register resources.");
-        
-        let app = gtk::Application::new(None::<&str>, gtk::gio::ApplicationFlags::FLAGS_NONE);
-        app.connect_activate(move |app| {
-            
-            let window = ApplicationWindow::new(app);
-            
-            window.set_default_size(800, 600);
-            window.set_title(Some("Video Player"));
-            
-            load_css("src\\widgets\\main_window\\style.css");
-            
-            let main_box = Box::new(gtk::Orientation::Horizontal, 10);
-            
-            window.set_child(Some(&main_box));
-            window.show();
-        });
-
-
-        let res = app.run();
-
-        unsafe {
-            gstreamer::deinit();
-        }
-        return res
     }
-    
     ExitCode::SUCCESS
 }

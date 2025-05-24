@@ -1,8 +1,8 @@
-<!-- <?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <interface>
     <object class="GtkColumnView" id="column_view">
         <style><class name="column-view"></class></style>
         <property name="vexpand">true</property>
         <property name="hexpand">true</property>
     </object>
-</interface> -->
+</interface>

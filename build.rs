@@ -13,11 +13,6 @@ fn main() {
         "mwindow.gresource");
 
     glib_build_tools::compile_resources(
-        &["src/widgets/split_panel"],
-        "src/widgets/split_panel/spanel.gresource.xml", 
-        "spanel.gresource");
-
-    glib_build_tools::compile_resources(
         &["src/widgets/seek_bar"], 
         "src/widgets/seek_bar/seekbar.gresource.xml", 
         "seekbar.gresource");
@@ -27,4 +22,8 @@ fn main() {
         "src/widgets/seek_bar/sharedseekbar.gresource.xml", 
         "sharedseekbar.gresource");
     
+    glib_build_tools::compile_resources(
+        &["src/widgets/split_panel"], 
+        "src/widgets/split_panel/sptable.gresource.xml", 
+        "sptable.gresource");
 }

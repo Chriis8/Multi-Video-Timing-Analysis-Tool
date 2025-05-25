@@ -64,6 +64,30 @@
                                         <property name="vexpand">false</property>
                                         <property name="orientation">vertical</property>
                                         <child>
+                                            <object class="GtkButton" id="test_button3">
+                                                <property name="hexpand">false</property>
+                                                <property name="halign">fill</property>
+                                                <property name="label">Toggle Control</property>
+                                            </object>
+                                        </child>
+                                        
+                                        <child>
+                                            <object class="GtkButton" id="test_button2">
+                                                <property name="hexpand">false</property>
+                                                <property name="halign">fill</property>
+                                                <property name="label">Set pos to 0</property>
+                                            </object>
+                                        </child>
+                                        
+                                        <child>
+                                            <object class="GtkButton" id="test_button">
+                                                <property name="hexpand">false</property>
+                                                <property name="halign">fill</property>
+                                                <property name="label">fetch positions</property>
+                                            </object>
+                                        </child>
+
+                                        <child>
                                             <object class="GtkButton" id="new_video_player_button">
                                                 <style><class name="new-video-player-button"></class></style>
                                                 <property name="hexpand">false</property>

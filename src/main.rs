@@ -1,11 +1,11 @@
 mod video_pipeline;
 use glib::{random_int_range, ExitCode, prelude::ObjectExt};
 use gtk::{FlowBox, FlowBoxChild, SelectionMode, SingleSelection,};
-use gtk::{ gdk::Display, glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button, CssProvider};
+use gtk::{glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button};
 use gstgtk4;
 mod widgets;
 use widgets::seek_bar::seek_bar::SeekBar;
-use widgets::seek_bar::shared_seek_bar::SharedSeekBar;
+use widgets::seek_bar::shared_seek_bar::{self, SharedSeekBar};
 use widgets::split_panel::splittable::SplitTable;
 use widgets::video_player_widget::video_player::VideoPlayer;
 use widgets::split_panel::splits::VideoSegment;
@@ -13,6 +13,9 @@ use gtk::prelude::GtkWindowExt;
 mod helpers;
 use crate::helpers::data::{get_data, store_data};
 use crate::helpers::ui::load_css;
+use crate::helpers::ui::flowbox_children;
+use crate::widgets::split_panel::timeentry::TimeEntry;
+use std::cell::Cell;
 
 const MAX_VIDEO_PLAYERS: u32 = 6;
 
@@ -29,6 +32,11 @@ fn build_ui(app: &Application) -> Builder {
     let add_row_below_button: Button = builder.object("add_row_below_button").expect("Failed to get add_row_below_button from UI File");
     let bottom_vbox: Box = builder.object("bottom_vbox").expect("Failed to get bottom_vbox from UI File");
     let start_time_offset_container: Box = builder.object("start_time_offset_container").expect("Failed to get start_time_offset_container from UI File");
+    
+    //Testing Stuff
+    let test_button: Button = builder.object("test_button").expect("failed to get test button");
+    let test_button2: Button = builder.object("test_button2").expect("failed to get test button2");
+    let test_button3: Button = builder.object("test_button3").expect("failed to get test button3");
     
     video_container.set_homogeneous(true);
     video_container.set_valign(gtk::Align::Fill);
@@ -51,7 +59,8 @@ fn build_ui(app: &Application) -> Builder {
     bottom_vbox.append(&ssb);
     
     // Adds an initial row
-    split_table.append_empty_row();
+    //split_table.append_empty_row();
+    //split_table.connect_row_to_seekbar(&video_container, 0);
     
     // Adds first row of segment names to the split table
     split_table.add_name_column("Segment Name");
@@ -69,13 +78,14 @@ fn build_ui(app: &Application) -> Builder {
             .model()
             .and_downcast::<SingleSelection>()
             .unwrap();
+        let mut selected_index = 0u32;
         if let Some(_selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
-            let selected_index = selection_model.selected();
-            split_table_clone.insert_empty_row(selected_index);
-            split_table_clone.connect_row_to_seekbar(&video_container_clone, selected_index);
-            let video_player_count = *unsafe { get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() } as i32;
-            shared_seek_bar_clone.connect_row(selected_index, video_player_count as u32);
+            selected_index = selection_model.selected();
         }
+        split_table_clone.insert_empty_row(selected_index);
+        split_table_clone.connect_row_to_seekbar(&video_container_clone, selected_index);
+        let video_player_count = *unsafe { get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() } as i32;
+        shared_seek_bar_clone.connect_row(selected_index, video_player_count as u32);
     });
 
     let video_container_clone = video_container.clone();
@@ -87,23 +97,23 @@ fn build_ui(app: &Application) -> Builder {
             .model()
             .and_downcast::<SingleSelection>()
             .unwrap();
+        let mut selected_index = 0u32;
         if let Some(_selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
-            let selected_index = selection_model.selected();
-            split_table_clone.insert_empty_row(selected_index + 1);
-            split_table_clone.connect_row_to_seekbar(&video_container_clone, selected_index + 1);
-            let video_player_count = *unsafe { get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() } as i32;
-            shared_seek_bar_clone.connect_row(selected_index + 1, video_player_count as u32);
+            selected_index = selection_model.selected() + 1;
         }
+        split_table_clone.insert_empty_row(selected_index);
+        split_table_clone.connect_row_to_seekbar(&video_container_clone, selected_index);
+        let video_player_count = *unsafe { get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() } as i32;
+        shared_seek_bar_clone.connect_row(selected_index, video_player_count as u32);
     });
-
-
-
+    
     let new_video_player_button: Button = builder.object("new_video_player_button").expect("Failed to get button");
     let builder_clone = builder.clone();
     let video_container_clone = video_container.clone();
     let shared_seek_bar_clone = ssb.clone();
     
     // Adds new video player and new columns to split table
+    let split_table_clone = split_table.clone();
     new_video_player_button.connect_clicked(move |_| {
         let count = *unsafe{ get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() };
         if count as u32 == MAX_VIDEO_PLAYERS {
@@ -117,7 +127,7 @@ fn build_ui(app: &Application) -> Builder {
         let new_player = VideoPlayer::new(count as u32);
         new_player.setup_event_handlers(window);
         
-        let split_table_clone = split_table.clone();
+        let split_table_clone_clone = split_table_clone.clone();
         // Listens to the split button from a video player
         // args[1] ID u32: index from the video player thats button was pressed
         // args[2] Position u64: time in nano seconds that the video player playback head was at when the button was pressed
@@ -125,24 +135,24 @@ fn build_ui(app: &Application) -> Builder {
             let video_player_index: u32 = args[1].get().unwrap();
             let video_player_position: u64 = args[2].get().unwrap();
             // Sets the time for the selected row
-            if let Err(e) = split_table_clone.set_split(video_player_index, video_player_position) {
+            if let Err(e) = split_table_clone_clone.set_split(video_player_index, video_player_position) {
                 eprintln!("{e}");
             }
             None
         });
 
-        let split_table_clone = split_table.clone();
+        let split_table_clone_clone = split_table_clone.clone();
         new_player.connect_local("set-start-button-clicked", false, move |args| {
             let video_player_index: u32 = args[1].get().unwrap();
             let video_player_position: u64 = args[2].get().unwrap();
-            if let Err(e) = split_table_clone.set_start_time_offset(video_player_index, video_player_position) {
+            if let Err(e) = split_table_clone_clone.set_start_time_offset(video_player_index, video_player_position) {
                 eprintln!("{e}");
             }
             None
         });
 
         // Adds start time offset entry text to start_time_offset liststore/columnview
-        let new_start_time_offset_time_entry = match split_table.add_start_time_offset_row() {
+        let new_start_time_offset_time_entry = match split_table_clone.add_start_time_offset_row() {
             Ok(te) => te,
             Err(e) => {
                 panic!("{e}")
@@ -159,15 +169,9 @@ fn build_ui(app: &Application) -> Builder {
         // Column 1: (Time) Split time -> time since the start of the clip
         // Column 2: (Duration) Segment time -> time since the last split
         let name = random_int_range(0, 99);
-        split_table.add_column(name.to_string().as_str(), count as u32, &format!("relative-time-{}", count));
-        split_table.add_column(name.to_string().as_str(), count as u32, &format!("duration-{}", count));
+        split_table_clone.add_column(name.to_string().as_str(), count as u32, &format!("relative-time-{}", count));
+        split_table_clone.add_column(name.to_string().as_str(), count as u32, &format!("duration-{}", count));
 
-
-
-
-
-
-        
         // Updates formatting of the video players and adds the new video player to the container
         let number_of_columns = (count as u32 + 1).clamp(1,3);
         video_container_clone.set_max_children_per_line(number_of_columns);
@@ -178,9 +182,105 @@ fn build_ui(app: &Application) -> Builder {
         // Updates video_container data keeping track of the active video players
         store_data(&video_container_clone, "count", count + 1);
 
-        split_table.connect_column_to_seekbar(&video_container_clone, video_player_index);
+        //split_table.connect_column_to_seekbar(&video_container_clone, video_player_index);
         let video_player_count = *unsafe { get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() } as i32;
         shared_seek_bar_clone.connect_column(video_player_index, video_player_count as u32);
+    });
+
+    let video_container_clone = video_container.clone();
+    test_button.connect_clicked(move |_| {
+        for (video_player_index, child) in flowbox_children(&video_container_clone).enumerate() {
+            let fb_child = match child.downcast_ref::<FlowBoxChild>() {
+                Some(c) => c,
+                None => continue,
+            };
+
+            let content = match fb_child.child() {
+                Some(c) => c,
+                None => continue,
+            };
+
+            let video_player = match content.downcast_ref::<VideoPlayer>() {
+                Some(vp) => vp,
+                None => continue,
+            };
+
+            let arc = match video_player.pipeline().upgrade() {
+                Some(a) => a,
+                None => {
+                    eprintln!("Shared jump to segment: Pipeline dropped");
+                    continue
+                }
+            };
+
+            let mut guard = match arc.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
+                    continue
+                }
+            };
+
+            if let Some(pipeline) = guard.as_mut() {
+                let time = pipeline.get_position().unwrap();
+                println!("Player {video_player_index} at position: {time}");
+            } else {
+                eprintln!("No pipeline for index {video_player_index}");
+            }
+        }
+    });
+
+    let split_table_clone = split_table.clone();
+    let video_container_clone = video_container.clone();
+    test_button2.connect_clicked(move |_| {
+        let offset_liststore = split_table_clone.get_start_time_offset_liststore().unwrap();
+        for (video_player_index, child) in flowbox_children(&video_container_clone).enumerate() {
+            let fb_child = match child.downcast_ref::<FlowBoxChild>() {
+                Some(c) => c,
+                None => continue,
+            };
+
+            let content = match fb_child.child() {
+                Some(c) => c,
+                None => continue,
+            };
+
+            let video_player = match content.downcast_ref::<VideoPlayer>() {
+                Some(vp) => vp,
+                None => continue,
+            };
+
+            let arc = match video_player.pipeline().upgrade() {
+                Some(a) => a,
+                None => {
+                    eprintln!("Shared jump to segment: Pipeline dropped");
+                    continue
+                }
+            };
+
+            let mut guard = match arc.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
+                    continue
+                }
+            };
+            
+            if let Some(pipeline) = guard.as_mut() {
+                let offset = offset_liststore.item(video_player_index as u32).and_downcast::<TimeEntry>().unwrap();
+                let start_time = gstreamer::ClockTime::from_nseconds(offset.get_time());
+                if let Err(e) = pipeline.seek_position(start_time) {
+                    eprintln!("Player {video_player_index} error setting position: {e}");
+                }
+            } else {
+                eprintln!("No pipeline for index {video_player_index}");
+            }
+        }
+    });
+
+    let shared_seek_bar_clone = ssb.clone();
+    test_button3.connect_clicked(move |_| {
+        shared_seek_bar_clone.toggle_has_control();
     });
 
     app.add_window(&window);

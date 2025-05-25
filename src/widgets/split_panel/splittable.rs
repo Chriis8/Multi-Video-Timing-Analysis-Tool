@@ -602,5 +602,4 @@ impl SplitTable {
             video_player.connect_time_to_seekbar(format!("video-{column_index}, seg-{i}"), time, "black");
         }
     }
-
 }

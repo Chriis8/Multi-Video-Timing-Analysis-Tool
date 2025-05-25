@@ -531,4 +531,9 @@ impl VideoPlayer {
         imp.set_start_time_button.set_sensitive(status);
         imp.split_button.set_sensitive(status);
     }
+
+    pub fn set_scale_interation(&self, status: bool) {
+        let imp = self.imp();
+        imp.seek_bar.set_sensitive(status);
+    }
 }

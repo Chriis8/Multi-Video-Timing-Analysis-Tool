@@ -1,4 +1,4 @@
-use gtk::{ gdk::Display, CssProvider};
+use gtk::{ gdk::Display, CssProvider, FlowBox, prelude::*};
 
 pub fn load_css(path: &str) {
     let provider = CssProvider::new();
@@ -14,4 +14,8 @@ pub fn load_css(path: &str) {
     if let Some(display) = Display::default() {
         gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
+}
+
+pub fn flowbox_children(flowbox: &FlowBox) -> impl Iterator<Item = gtk::Widget> {
+    std::iter::successors(flowbox.first_child(), |w| w.next_sibling())
 }

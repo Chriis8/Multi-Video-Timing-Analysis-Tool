@@ -12,12 +12,12 @@ use crate::widgets::split_panel::timeentry::TimeEntry;
 use std::rc::Rc;
 use std::cell::{Cell, RefCell};
 use once_cell::sync::Lazy;
+use crate::widgets::seek_bar::seek_bar::SeekBar;
 
 mod imp {
     use gtk::{Box, Button, Label, Picture};
     use glib::subclass::Signal;
 
-    use crate::widgets::seek_bar::seek_bar::SeekBar;
 
     use super::*;
     
@@ -105,13 +105,16 @@ mod imp {
         }
 
         fn set_controls(&self, status: bool) {
-            self.seek_bar.set_sensitive(status);
             self.next_frame_button.set_sensitive(status);
             self.previous_frame_button.set_sensitive(status);
             self.play_button.set_sensitive(status);
             self.stop_button.set_sensitive(status);
             self.set_start_time_button.set_sensitive(status);
             self.split_button.set_sensitive(status);
+        }
+
+        fn set_scale_interation(&self, status: bool) {
+            self.seek_bar.set_sensitive(status);
         }
     }
     
@@ -132,6 +135,7 @@ mod imp {
         fn constructed(&self) {
             self.setup_seek_bar();
             self.set_controls(false);
+            self.set_scale_interation(false);
         }
 
         fn signals() -> &'static [Signal] {
@@ -149,7 +153,9 @@ mod imp {
                     .flags(glib::SignalFlags::RUN_LAST)
                     .param_types([u32::static_type(), u64::static_type()])
                     .build(),
-                    ]
+                    Signal::builder("seek-bar-pressed")
+                    .flags(glib::SignalFlags::RUN_LAST)
+                    .build(),]
                 });
             SIGNALS.as_ref()
         }
@@ -250,10 +256,13 @@ impl VideoPlayer {
 
         let gesture = gtk::GestureClick::new();
         gesture.connect_pressed(glib::clone!(
+            #[weak(rename_to = this)] self,
             #[weak(rename_to = is_dragging_weak)] imp.is_dragging,
             move |_,_,_x,_y| {
                 //println!("---------------------Left click Begin at: x: {x}, y: {y}");
                 is_dragging_weak.set(true);
+                println!("emiiiittttttting seek-bar-pressed");
+                this.emit_by_name::<()>("seek-bar-pressed", &[]);
             }
         ));
 
@@ -302,6 +311,7 @@ impl VideoPlayer {
             #[weak(rename_to = seekbar)] imp.seek_bar,
             move |_| {
                 this.set_controls(false);
+                this.set_scale_interation(false);
                 let videos_filter = gtk::FileFilter::new();
                 videos_filter.set_name(Some("Video Files"));
                 videos_filter.add_pattern("*.mp4");   // MP4 format
@@ -343,6 +353,7 @@ impl VideoPlayer {
                                             let nanos: &dyn ToValue = &timeline_length;
                                             this.emit_by_name::<()>("timeline-length-acquired", &[nanos]);
                                             this.set_controls(true);
+                                            this.set_scale_interation(true);
                                         } else {
                                             eprintln!("No Video Pipeline available");
                                         }
@@ -523,7 +534,6 @@ impl VideoPlayer {
 
     pub fn set_controls(&self, status: bool) {
         let imp = self.imp();
-        imp.seek_bar.set_sensitive(status);
         imp.next_frame_button.set_sensitive(status);
         imp.previous_frame_button.set_sensitive(status);
         imp.play_button.set_sensitive(status);
@@ -535,5 +545,11 @@ impl VideoPlayer {
     pub fn set_scale_interation(&self, status: bool) {
         let imp = self.imp();
         imp.seek_bar.set_sensitive(status);
+    }
+
+    pub fn get_seek_bar(&self) -> Option<SeekBar> {
+        let imp = self.imp();
+        let sb = imp.seek_bar.get();
+        return Some(sb);
     }
 }

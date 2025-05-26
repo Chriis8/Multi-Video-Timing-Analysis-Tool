@@ -151,6 +151,17 @@ fn build_ui(app: &Application) -> Builder {
             None
         });
 
+        new_player.connect_local("seek-bar-pressed", false, glib::clone!(
+            #[strong(rename_to = shared_seek_bar)] shared_seek_bar_clone,
+            move |_| {
+                if shared_seek_bar.get_control_state() {
+                    println!("User interacted with video player -> toggling control off");
+                    shared_seek_bar.toggle_has_control();
+                }
+                None
+            }
+        ));
+
         // Adds start time offset entry text to start_time_offset liststore/columnview
         let new_start_time_offset_time_entry = match split_table_clone.add_start_time_offset_row() {
             Ok(te) => te,

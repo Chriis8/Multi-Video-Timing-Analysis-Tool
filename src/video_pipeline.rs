@@ -51,9 +51,7 @@ impl VideoPipeline {
     // Updates rate of video playback
     //  1.0 - forward
     // -1.0 - backward
-    fn set_rate(&self, rate: f64) -> bool {
-    
-        eprintln!("---------- (Send seek event Before) video time: {:?}", self.pipeline.query_position::<gstreamer::ClockTime>());
+    fn set_rate(&self, rate: f64, start: ClockTime, end: ClockTime) -> bool {
         let position = match self.pipeline.query_position::<gstreamer::ClockTime>() {
             Some(pos) => pos,
             None => {
@@ -61,28 +59,26 @@ impl VideoPipeline {
                 return false;
             }
         };
-        eprintln!("---------- (Send seek event during) video time: {:?}", position);
         let seek_event = if rate > 0. {
             Seek::new(
                 rate,
                 SeekFlags::FLUSH | SeekFlags::ACCURATE,
                 SeekType::Set,
                 position,
-                SeekType::End,
-                gstreamer::ClockTime::ZERO,
+                SeekType::Set,
+                end,
             )
         } else {
             Seek::new(
                 rate,
                 SeekFlags::FLUSH | SeekFlags::ACCURATE,
                 SeekType::Set,
-                gstreamer::ClockTime::ZERO,
+                start,
                 SeekType::Set,
                 position,
             )
         };
         self.pipeline.send_event(seek_event);
-        eprintln!("---------- (Send seek event After) video time: {:?}", self.pipeline.query_position::<gstreamer::ClockTime>());
         true
     }
 
@@ -265,9 +261,10 @@ impl VideoPipeline {
             _ => gstreamer::State::Playing,
         };
 
+        let length = self.pipeline.query_duration::<ClockTime>().unwrap();
         let mut state = self.state.borrow_mut();
         if new_state == gstreamer::State::Playing && state.direction == PlaybackDirection::Reverse {
-            self.set_rate(1.);
+            self.set_rate(1., ClockTime::ZERO, length);
             state.direction = PlaybackDirection::Forward;
         }
 
@@ -297,9 +294,10 @@ impl VideoPipeline {
             return;
         }
         // Sets direction to forward
+        let length = self.pipeline.query_duration::<ClockTime>().unwrap();
         let mut state = self.state.borrow_mut();
         if state.direction == PlaybackDirection::Reverse {
-            self.set_rate(1.);
+            self.set_rate(1., ClockTime::ZERO, length);
             state.direction = PlaybackDirection::Forward;
         }
         // Steps 1 frame
@@ -320,9 +318,10 @@ impl VideoPipeline {
             return;
         }
         // Set video direction backward
+        let length = self.pipeline.query_duration::<ClockTime>().unwrap();
         let mut state = self.state.borrow_mut();
         if state.direction == PlaybackDirection::Forward {
-            self.set_rate(-1.);
+            self.set_rate(-1., ClockTime::ZERO, length);
             state.direction = PlaybackDirection::Reverse;
         }
         // Step 1 frame
@@ -372,4 +371,21 @@ impl VideoPipeline {
             }
         }
     }
+
+    pub fn play_video_clamp(&self, start: ClockTime, end: ClockTime) {
+        let (_,current_state,_) = self.pipeline.state(gstreamer::ClockTime::NONE);
+        let new_state = match current_state {
+            gstreamer::State::Null => return,
+            gstreamer::State::Playing => gstreamer::State::Paused,
+            _ => gstreamer::State::Playing,
+        };
+
+        let mut state = self.state.borrow_mut();
+        self.set_rate(1., start, end);
+        state.direction = PlaybackDirection::Forward;
+
+        println!("new state: {:?}", new_state);
+        self.pipeline.set_state(new_state).expect("Failed to set state");
+    }
+
 }

@@ -47,10 +47,16 @@
     background-color: rgb(255, 245, 160);
 }
 
+.scale-slider-hidden scale slider {
+    background: transparent;
+    border: none;
+}
+
 scale slider {
     background-color: rgb(29, 128, 249);
     background-image: none;
 }
+
 
 entry {
     padding: 0px;

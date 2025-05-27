@@ -682,7 +682,6 @@ impl SharedSeekBar {
     pub fn new(video_player_container: &FlowBox, split_table: &ColumnView, start_time_offset_liststore: &ListStore, split_table_liststore: &ListStore) -> Self {
         let widget: Self = glib::Object::new::<Self>();
         let imp = imp::SharedSeekBar::from_obj(&widget);
-        imp.seek_bar.add_css_class("scale-slider-hidden");
         imp.seek_bar.set_auto_timeline_length_handling(true);
         imp.video_player_container.borrow_mut().replace(Downgrade::downgrade(video_player_container));
         imp.split_table.borrow_mut().replace(Downgrade::downgrade(split_table));
@@ -691,6 +690,7 @@ impl SharedSeekBar {
         imp.scale_start_instant.set(None);
         imp.setup_buttons();
         imp.setup_seek_bar_control();
+        widget.set_controls(false);
         widget
     }
 
@@ -819,37 +819,43 @@ impl SharedSeekBar {
             };
             
             if let Some(pipeline) = guard.as_mut() {
+                pipeline.pause_video();
                 if !status {
                     let offset = start_time_offset_liststore.item(video_player_index as u32).and_downcast::<TimeEntry>().unwrap();
                     let start_time = gstreamer::ClockTime::from_nseconds(offset.get_time());
                     if let Err(e) = pipeline.seek_position(start_time) {
                         eprintln!("Player {video_player_index} error setting position: {e}");
                     }
-                    video_player.set_controls(false);
-                } else {
-                    pipeline.pause_video();
-                    video_player.set_controls(true);
+                    imp.seek_bar.get_scale().set_value(0.0);
                 }
             } else {
                 eprintln!("No pipeline for index {video_player_index}");
             }
-        } 
-        if !status {
-            imp.is_paused.set(true);
-            imp.seek_bar.remove_css_class("scale-slider-hidden");
-            imp.has_control.set(true);
-            imp.seek_bar.set_sensitive(true);
-        } else {
-            imp.is_paused.set(true);
-            imp.seek_bar.add_css_class("scale-slider-hidden");
-            imp.has_control.set(false);
-            imp.seek_bar.set_sensitive(false);
         }
+        imp.is_paused.set(true);
+        imp.has_control.set(!status);
+        self.set_controls(!status);
     }
 
     pub fn get_control_state(&self) -> bool {
         let imp = self.imp();
         return imp.has_control.get();
+    }
+
+    fn set_controls(&self, status: bool) {
+        let imp = self.imp();
+        if status {
+            imp.seek_bar.remove_css_class("scale-slider-hidden");
+        } else {
+            imp.seek_bar.add_css_class("scale-slider-hidden");
+        }
+        imp.seek_bar.set_sensitive(status);
+        imp.jump_to_segment_button.set_sensitive(status);
+        imp.next_frame_button.set_sensitive(status);
+        imp.next_segment_button.set_sensitive(status);
+        imp.play_button.set_sensitive(status);
+        imp.previous_frame_button.set_sensitive(status);
+        imp.previous_segment_button.set_sensitive(status);
     }
 }
 

@@ -4,11 +4,14 @@ use gtk::{FlowBox, FlowBoxChild, SelectionMode, SingleSelection,};
 use gtk::{glib, prelude::*, Application, ApplicationWindow, Box, Builder, Button};
 use gstgtk4;
 mod widgets;
+use helpers::data::get_next_id;
 use widgets::seek_bar::seek_bar::SeekBar;
 use widgets::seek_bar::shared_seek_bar::{self, SharedSeekBar};
 use widgets::split_panel::splittable::SplitTable;
+use widgets::sync::{self, sync_manager};
 use widgets::video_player_widget::video_player::VideoPlayer;
 use widgets::split_panel::splits::VideoSegment;
+use video_pipeline::VideoPipeline;
 use gtk::prelude::GtkWindowExt;
 mod helpers;
 use crate::helpers::data::{get_data, store_data};
@@ -16,6 +19,8 @@ use crate::helpers::ui::load_css;
 use crate::helpers::ui::flowbox_children;
 use crate::widgets::split_panel::timeentry::TimeEntry;
 use std::cell::Cell;
+use crate::widgets::sync::sync_manager::SyncManager;
+use crate::helpers::data;
 
 const MAX_VIDEO_PLAYERS: u32 = 6;
 
@@ -55,7 +60,10 @@ fn build_ui(app: &Application) -> Builder {
 
     split_table.setup_start_time_offset_column("Start Time Offsets");
 
-    let ssb = SharedSeekBar::new(&video_container, &split_table_cv, &start_time_offset_ls, &split_table_ls);
+    let sync_manager = SyncManager::new();
+    store_data(&window, "sync_manager", sync_manager.clone());
+
+    let ssb = SharedSeekBar::new(&video_container, &split_table_cv, &start_time_offset_ls, &split_table_ls, &sync_manager);
     bottom_vbox.append(&ssb);
     
     // Adds an initial row
@@ -114,6 +122,7 @@ fn build_ui(app: &Application) -> Builder {
     
     // Adds new video player and new columns to split table
     let split_table_clone = split_table.clone();
+    let sync_manager_clone = sync_manager.clone();
     new_video_player_button.connect_clicked(move |_| {
         let count = *unsafe{ get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() };
         if count as u32 == MAX_VIDEO_PLAYERS {
@@ -162,6 +171,19 @@ fn build_ui(app: &Application) -> Builder {
             }
         ));
 
+        let name = get_next_id();
+        new_player.connect_local("pipeline-built", false, glib::clone!(
+            #[strong(rename_to = sync_man)] sync_manager,
+            #[strong(rename_to = pipeline_id)] name,
+            #[strong(rename_to = video_player)] new_player,
+            move |_| {
+                let pipeline = video_player.pipeline();
+                sync_man.add_pipeline(pipeline_id.to_string().as_str(), pipeline);
+                None
+            }
+        ));
+
+        
         // Adds start time offset entry text to start_time_offset liststore/columnview
         let new_start_time_offset_time_entry = match split_table_clone.add_start_time_offset_row() {
             Ok(te) => te,
@@ -169,17 +191,17 @@ fn build_ui(app: &Application) -> Builder {
                 panic!("{e}")
             }
         };
-
+        
         new_start_time_offset_time_entry.connect_notify_local(Some("time"), glib::clone!(
             #[weak(rename_to = shared_seek_bar)] shared_seek_bar_clone,
+            #[strong] name,
             move |_, _| {
                 shared_seek_bar.update_timeline_length();
-        }));
-        
+            }));
+            
         // Adds two columns to split table for each new video player
         // Column 1: (Time) Split time -> time since the start of the clip
         // Column 2: (Duration) Segment time -> time since the last split
-        let name = random_int_range(0, 99);
         split_table_clone.add_column(name.to_string().as_str(), count as u32, &format!("relative-time-{}", count));
         split_table_clone.add_column(name.to_string().as_str(), count as u32, &format!("duration-{}", count));
 
@@ -224,20 +246,15 @@ fn build_ui(app: &Application) -> Builder {
                 }
             };
 
-            let mut guard = match arc.lock() {
+            let mut pipeline = match arc.lock() {
                 Ok(g) => g,
                 Err(_) => {
                     eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
                     continue
                 }
             };
-
-            if let Some(pipeline) = guard.as_mut() {
-                let time = pipeline.get_position().unwrap();
-                println!("Player {video_player_index} at position: {time}");
-            } else {
-                eprintln!("No pipeline for index {video_player_index}");
-            }
+            let time = pipeline.get_position().unwrap();
+            println!("Player {video_player_index} at position: {time}");
         }
     });
 
@@ -269,27 +286,23 @@ fn build_ui(app: &Application) -> Builder {
                 }
             };
 
-            let mut guard = match arc.lock() {
+            let mut pipeline = match arc.lock() {
                 Ok(g) => g,
                 Err(_) => {
                     eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
                     continue
                 }
             };
-            
-            if let Some(pipeline) = guard.as_mut() {
-                let offset = offset_liststore.item(video_player_index as u32).and_downcast::<TimeEntry>().unwrap();
-                let start_time = gstreamer::ClockTime::from_nseconds(offset.get_time());
-                if let Err(e) = pipeline.seek_position(start_time) {
-                    eprintln!("Player {video_player_index} error setting position: {e}");
-                }
-            } else {
-                eprintln!("No pipeline for index {video_player_index}");
+            let offset = offset_liststore.item(video_player_index as u32).and_downcast::<TimeEntry>().unwrap();
+            let start_time = gstreamer::ClockTime::from_nseconds(offset.get_time());
+            if let Err(e) = pipeline.seek_position(start_time) {
+                eprintln!("Player {video_player_index} error setting position: {e}");
             }
         }
     });
 
     let shared_seek_bar_clone = ssb.clone();
+    let video_container_clone = video_container.clone();
     test_button3.connect_clicked(move |_| {
         shared_seek_bar_clone.toggle_has_control();
     });
@@ -337,12 +350,30 @@ fn main() -> glib::ExitCode {
             app.connect_shutdown(move |_| {
                 println!("shutting down");
                 let video_container: FlowBox = builder_clone.object("video_container").expect("failed to get video_container from UI file");
-                while let Some(child) = video_container.last_child() {
-                    let video = child.downcast::<FlowBoxChild>().unwrap();
+                for child in flowbox_children(&video_container) {
+                    let fb_child = match child.downcast_ref::<FlowBoxChild>() {
+                        Some(c) => c,
+                        None => continue,
+                    };
+
+                    let content = match fb_child.child() {
+                        Some(c) => c,
+                        None => continue,
+                    };
+
+                    let video_player = match content.downcast_ref::<VideoPlayer>() {
+                        Some(vp) => vp,
+                        None => continue,
+                    };
+                    video_player.unparent();
                     unsafe {
-                        video.unparent(); 
-                        video.run_dispose();
+                        video_player.run_dispose();
                     }
+                }
+                let window: ApplicationWindow = builder.object("main_window").expect("Failed to get main_window from UI file");
+                let sync_manager = unsafe { get_data::<SyncManager>(&window, "sync_manager").unwrap().as_ref() };
+                unsafe {
+                    sync_manager.run_dispose();
                 }
             });
 

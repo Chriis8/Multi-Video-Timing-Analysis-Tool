@@ -9,18 +9,18 @@ use crate::widgets::seek_bar::seek_bar::SeekBar;
 use crate::widgets::video_player_widget::video_player::VideoPlayer;
 use crate::widgets::split_panel::splits::VideoSegment;
 use crate::widgets::split_panel::timeentry::TimeEntry;
+use crate::widgets::sync::sync_manager::SyncManager;
 use gstreamer::ClockTime;
 use std::cell::{RefCell, Cell};
 use std::rc::Rc;
 use glib::WeakRef;
 use std::time::Instant;
 use crate::helpers::ui::flowbox_children;
+use std::time::Duration;
+use glib::timeout_add_local;
+use std::sync::{Arc, Mutex};
 
 mod imp {
-    use std::time::Duration;
-
-    use glib::timeout_add_local;
-
     use super::*;
     
     #[derive(CompositeTemplate, Default)] 
@@ -45,11 +45,12 @@ mod imp {
         pub split_table: RefCell<Option<WeakRef<ColumnView>>>,
         pub start_time_offset_liststore: RefCell<Option<WeakRef<ListStore>>>,
         pub split_table_liststore: RefCell<Option<WeakRef<ListStore>>>,
+        pub sync_manager: RefCell<Option<WeakRef<SyncManager>>>,
 
         pub is_dragging: Rc<Cell<bool>>,
         pub is_paused: Rc<Cell<bool>>,
         pub has_control: Rc<Cell<bool>>,
-        pub scale_start_instant: Rc<Cell<Option<Instant>>>,
+        pub scale_start_instant: Arc<Mutex<Option<Instant>>>,
         pub scale_start_offset: Rc<Cell<f64>>,
     }
 
@@ -122,23 +123,19 @@ mod imp {
                             }
                         };
 
-                        let mut guard = match arc.lock() {
+                        let mut pipeline = match arc.lock() {
                             Ok(g) => g,
                             Err(_) => {
                                 eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
                                 continue
                             }
                         };
-
-                        if let Some(pipeline) = guard.as_mut() {
-                            if let Some(selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
-                                let time = selection.get_time(video_player_index).and_then(|nanos| Some(ClockTime::from_nseconds(nanos))).unwrap();
-                                if let Ok(result) = pipeline.seek_position(time) {
-                                    println!("Shared pipeline seek for video player {video_player_index} to position {time}");
-                                }
+                        
+                        if let Some(selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
+                            let time = selection.get_time(video_player_index).and_then(|nanos| Some(ClockTime::from_nseconds(nanos))).unwrap();
+                            if let Ok(result) = pipeline.seek_position(time) {
+                                println!("Shared pipeline seek for video player {video_player_index} to position {time}");
                             }
-                        } else {
-                            eprintln!("No pipeline for index {video_player_index}");
                         }
                     }
                     println!("Pressed shared preivous segment button");
@@ -190,19 +187,15 @@ mod imp {
                             }
                         };
 
-                        let mut guard = match arc.lock() {
+                        let mut pipeline = match arc.lock() {
                             Ok(g) => g,
                             Err(_) => {
                                 eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
                                 continue
                             }
                         };
-
-                        if let Some(pipeline) = guard.as_mut() {
-                            pipeline.frame_backward();
-                        } else {
-                            eprintln!("No pipeline for index {video_player_index}");
-                        }
+                        
+                        pipeline.frame_backward();
                     }
                 }
             ));
@@ -213,6 +206,7 @@ mod imp {
                 #[strong(rename_to = seek_bar)] self.seek_bar,
                 #[strong(rename_to = scale_start_offset)] self.scale_start_offset,
                 #[strong(rename_to = is_paused)] self.is_paused,
+                #[strong(rename_to = sync_manager_weak)] self.sync_manager,
                 move |_| {
                     let video_player_container_borrow = video_player_container_weak.borrow();
                     let video_player_container_ref = match video_player_container_borrow.as_ref() {
@@ -232,7 +226,18 @@ mod imp {
                         Some(st) => st,
                         None => return,
                     };
+                    let sync_manager_weak_borrow = sync_manager_weak.borrow();
+                    let sync_manager_ref = match sync_manager_weak_borrow.as_ref() {
+                        Some(st) => st,
+                        None => return,
+                    };
+                    let sync_manager = match sync_manager_ref.upgrade() {
+                        Some(st) => st,
+                        None => return,
+                    };
 
+                    let mut starts: Vec<ClockTime> = Vec::new();
+                    let mut ends: Vec<ClockTime> = Vec::new();
                     for (video_player_index, child) in flowbox_children(&video_player_container).enumerate() {
                         let fb_child = match child.downcast_ref::<FlowBoxChild>() {
                             Some(c) => c,
@@ -257,7 +262,7 @@ mod imp {
                             }
                         };
 
-                        let mut guard = match arc.lock() {
+                        let mut pipeline = match arc.lock() {
                             Ok(g) => g,
                             Err(_) => {
                                 eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
@@ -270,16 +275,26 @@ mod imp {
                             .get_time(video_player_index)
                             .unwrap();
 
-                        if let Some(pipeline) = guard.as_mut() {
-                            //pipeline.play_video();
-                            let last_mark_clocktime = ClockTime::from_nseconds(last_mark_position);
-                            println!("{last_mark_clocktime:?}");
-                            pipeline.play_video_clamp(ClockTime::from_seconds(0), ClockTime::from_nseconds(last_mark_position));
-                        } else {
-                            eprintln!("No pipeline for index {video_player_index}");
-                        }
+                        //pipeline.play_video();
+                        let last_mark_clocktime = ClockTime::from_nseconds(last_mark_position);
+                        starts.push(ClockTime::from_seconds(0));
+                        ends.push(ClockTime::from_nseconds(last_mark_position));
+                        //pipeline.play_video_clamp(ClockTime::from_seconds(0), ClockTime::from_nseconds(last_mark_position));
                     }
-                    scale_start_instant.set(Some(Instant::now()));
+
+                    sync_manager.clear_state();
+
+                    sync_manager.set_on_all_playing(glib::clone!(
+                        #[weak(rename_to = start_instant)] scale_start_instant,
+                        move || {
+                            let now = Instant::now();
+                            println!("callbacked now: {now:?}");
+                            *start_instant.lock().unwrap() = Some(now);
+                        }
+                    ));
+
+                    sync_manager.play_videos(starts, ends);
+
                     scale_start_offset.set(seek_bar.get_scale().value());
                     is_paused.set(!is_paused.get());
                 }
@@ -330,19 +345,14 @@ mod imp {
                             }
                         };
 
-                        let mut guard = match arc.lock() {
+                        let mut pipeline = match arc.lock() {
                             Ok(g) => g,
                             Err(_) => {
                                 eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
                                 continue
                             }
                         };
-
-                        if let Some(pipeline) = guard.as_mut() {
-                            pipeline.frame_forward();
-                        } else {
-                            eprintln!("No pipeline for index {video_player_index}");
-                        }
+                        pipeline.frame_forward();
                     }
                 }
             ));
@@ -396,23 +406,19 @@ mod imp {
                             }
                         };
 
-                        let mut guard = match arc.lock() {
+                        let mut pipeline = match arc.lock() {
                             Ok(g) => g,
                             Err(_) => {
                                 eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
                                 continue
                             }
                         };
-
-                        if let Some(pipeline) = guard.as_mut() {
-                            if let Some(selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
-                                let time = selection.get_time(video_player_index).and_then(|nanos| Some(ClockTime::from_nseconds(nanos))).unwrap();
-                                if let Ok(result) = pipeline.seek_position(time) {
-                                    println!("Shared pipeline seek for video player {video_player_index} to position {time}");
-                                }
+                        
+                        if let Some(selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
+                            let time = selection.get_time(video_player_index).and_then(|nanos| Some(ClockTime::from_nseconds(nanos))).unwrap();
+                            if let Ok(result) = pipeline.seek_position(time) {
+                                println!("Shared pipeline seek for video player {video_player_index} to position {time}");
                             }
-                        } else {
-                            eprintln!("No pipeline for index {video_player_index}");
                         }
                     }
                 }
@@ -463,24 +469,19 @@ mod imp {
                             }
                         };
 
-                        let mut guard = match arc.lock() {
+                        let mut pipeline = match arc.lock() {
                             Ok(g) => g,
                             Err(_) => {
                                 eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
                                 continue
                             }
                         };
-
-                        if let Some(pipeline) = guard.as_mut() {
-                            let selection_model = split_table.model().and_downcast::<SingleSelection>().unwrap();
-                            if let Some(selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
-                                let time = selection.get_time(video_player_index).and_then(|nanos| Some(ClockTime::from_nseconds(nanos))).unwrap();
-                                if let Ok(result) = pipeline.seek_position(time) {
-                                    println!("Shared pipeline seek for video player {video_player_index} to position {time}");
-                                }
+                        let selection_model = split_table.model().and_downcast::<SingleSelection>().unwrap();
+                        if let Some(selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
+                            let time = selection.get_time(video_player_index).and_then(|nanos| Some(ClockTime::from_nseconds(nanos))).unwrap();
+                            if let Ok(result) = pipeline.seek_position(time) {
+                                println!("Shared pipeline seek for video player {video_player_index} to position {time}");
                             }
-                        } else {
-                            eprintln!("No pipeline for index {video_player_index}");
                         }
                     }
                 }
@@ -503,13 +504,13 @@ mod imp {
                         let control = has_control.get();
                         let paused = is_paused.get();
 
-                        //println!("skipping flags: dragging: {drag}, control: {control}, paused: {paused}");
+                        println!("skipping flags: dragging: {drag}, control: {control}, paused: {paused}");
                         return glib::ControlFlow::Continue;
                     }
-                    let instant = match start_instant.get() {
+                    let instant = match *start_instant.lock().unwrap() {
                         Some(time) => time,
                         None => {
-                            //eprintln!("Error");
+                            eprintln!("Error");
                             return glib::ControlFlow::Continue;
                         }
                     };
@@ -564,7 +565,7 @@ mod imp {
                             }
                         };
 
-                        let mut guard = match arc.lock() {
+                        let mut pipeline = match arc.lock() {
                             Ok(g) => g,
                             Err(_) => {
                                 eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
@@ -572,11 +573,7 @@ mod imp {
                             }
                         };
 
-                        if let Some(pipeline) = guard.as_mut() {
-                            pipeline.pause_video();
-                        } else {
-                            eprintln!("No pipeline for index {video_player_index}");
-                        }
+                        pipeline.pause_video();
                     }
                     is_paused.set(true);
                     is_dragging.set(true);
@@ -631,24 +628,19 @@ mod imp {
                             }
                         };
 
-                        let mut guard = match arc.lock() {
+                        let mut pipeline = match arc.lock() {
                             Ok(g) => g,
                             Err(_) => {
                                 eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
                                 continue
                             }
                         };
-
-                        if let Some(pipeline) = guard.as_mut() {
-                            let offset_time_entry = start_time_offset_liststore.item(video_player_index as u32).and_downcast::<TimeEntry>().unwrap();
-                            let offset_time = offset_time_entry.get_time();
-                            let percent_position = seek_bar.get_scale().value() / 100.0;
-                            let position = (percent_position * seek_bar.get_timeline_length() as f64) as u64;
-                            let clock_time_position = ClockTime::from_nseconds(position + offset_time);
-                            pipeline.seek_position(clock_time_position).expect("Failed to seek to synced position");
-                        } else {
-                            eprintln!("No pipeline for index {video_player_index}");
-                        }
+                        let offset_time_entry = start_time_offset_liststore.item(video_player_index as u32).and_downcast::<TimeEntry>().unwrap();
+                        let offset_time = offset_time_entry.get_time();
+                        let percent_position = seek_bar.get_scale().value() / 100.0;
+                        let position = (percent_position * seek_bar.get_timeline_length() as f64) as u64;
+                        let clock_time_position = ClockTime::from_nseconds(position + offset_time);
+                        pipeline.seek_position(clock_time_position).expect("Failed to seek to synced position");
                     }
                     is_dragging.set(false);
                 }
@@ -679,15 +671,17 @@ glib::wrapper! {
 }
 
 impl SharedSeekBar {
-    pub fn new(video_player_container: &FlowBox, split_table: &ColumnView, start_time_offset_liststore: &ListStore, split_table_liststore: &ListStore) -> Self {
+    pub fn new(video_player_container: &FlowBox, split_table: &ColumnView, start_time_offset_liststore: &ListStore, split_table_liststore: &ListStore, sync_manager: &SyncManager) -> Self {
         let widget: Self = glib::Object::new::<Self>();
         let imp = imp::SharedSeekBar::from_obj(&widget);
         imp.seek_bar.set_auto_timeline_length_handling(true);
+        imp.seek_bar.update_marks_on_width_change_timeout();
         imp.video_player_container.borrow_mut().replace(Downgrade::downgrade(video_player_container));
         imp.split_table.borrow_mut().replace(Downgrade::downgrade(split_table));
         imp.start_time_offset_liststore.borrow_mut().replace(Downgrade::downgrade(start_time_offset_liststore));
         imp.split_table_liststore.borrow_mut().replace(Downgrade::downgrade(split_table_liststore));
-        imp.scale_start_instant.set(None);
+        imp.sync_manager.borrow_mut().replace(Downgrade::downgrade(sync_manager));
+        *imp.scale_start_instant.lock().unwrap() = None;
         imp.setup_buttons();
         imp.setup_seek_bar_control();
         widget.set_controls(false);
@@ -810,27 +804,23 @@ impl SharedSeekBar {
                 }
             };
 
-            let mut guard = match arc.lock() {
+            let pipeline = match arc.lock() {
                 Ok(g) => g,
                 Err(_) => {
                     eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
                     continue
                 }
             };
-            
-            if let Some(pipeline) = guard.as_mut() {
-                pipeline.pause_video();
-                if !status {
-                    let offset = start_time_offset_liststore.item(video_player_index as u32).and_downcast::<TimeEntry>().unwrap();
-                    let start_time = gstreamer::ClockTime::from_nseconds(offset.get_time());
-                    if let Err(e) = pipeline.seek_position(start_time) {
-                        eprintln!("Player {video_player_index} error setting position: {e}");
-                    }
-                    imp.seek_bar.get_scale().set_value(0.0);
+            pipeline.pause_video();
+            if !status {
+                let offset = start_time_offset_liststore.item(video_player_index as u32).and_downcast::<TimeEntry>().unwrap();
+                let start_time = gstreamer::ClockTime::from_nseconds(offset.get_time());
+                if let Err(e) = pipeline.seek_position(start_time) {
+                    eprintln!("Player {video_player_index} error setting position: {e}");
                 }
-            } else {
-                eprintln!("No pipeline for index {video_player_index}");
+                imp.seek_bar.get_scale().set_value(0.0);
             }
+            video_player.set_controls(status);
         }
         imp.is_paused.set(true);
         imp.has_control.set(!status);

@@ -1,5 +1,5 @@
 use std::{cell::RefCell, time::Duration};
-use gstreamer::{event::{Seek, Step}, prelude::*, ClockTime, CoreError, ErrorMessage, SeekFlags, SeekType, StateChangeReturn, StateChangeSuccess};
+use gstreamer::{event::{Seek, Step}, prelude::*, ClockTime, CoreError, ErrorMessage, Pipeline, SeekFlags, SeekType, StateChangeReturn, StateChangeSuccess};
 use gtk;
 use gtk::gdk;
 
@@ -248,8 +248,8 @@ impl VideoPipeline {
     }
 
     // Gets video bus
-    pub fn get_bus(&self) -> gstreamer::Bus {
-        self.pipeline.bus().unwrap()
+    pub fn get_bus(&self) -> Option<gstreamer::Bus> {
+        self.pipeline.bus()
     }
 
     // Sets the video to the playing state
@@ -388,4 +388,13 @@ impl VideoPipeline {
         self.pipeline.set_state(new_state).expect("Failed to set state");
     }
 
+    pub fn pipeline(&self) -> Option<Pipeline> {
+        return Some(self.pipeline.clone());
+    }
+}
+
+impl Default for VideoPipeline {
+    fn default() -> Self {
+        Self::new()
+    }
 }

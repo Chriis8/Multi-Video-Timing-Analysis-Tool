@@ -24,7 +24,7 @@ mod imp {
     #[derive(CompositeTemplate, Default)]
     #[template(resource = "/videoplayer/vplayer.ui")]
     pub struct VideoPlayer {
-        pub gstreamer_manager: Arc<Mutex<Option<VideoPipeline>>>,
+        pub gstreamer_manager: Arc<Mutex<VideoPipeline>>,
 
         pub timeout_id: Rc<RefCell<Option<glib::SourceId>>>,
 
@@ -120,13 +120,10 @@ mod imp {
     
     impl ObjectImpl for VideoPlayer {
         fn dispose(&self) {
-            if let Ok(mut guard) = self.gstreamer_manager.lock() {
-                if let Some(ref mut pipeline) = *guard {
-                    *self.continue_timeout.borrow_mut() = false;
-                    pipeline.cleanup();
-                } else { 
-                    eprintln!("Can't cleanup pipeline");
-                }
+            if let Ok(mut pipeline) = self.gstreamer_manager.lock() {
+                println!("pipeline cleanup");
+                *self.continue_timeout.borrow_mut() = false;
+                pipeline.cleanup();
             } else {
                 eprintln!("Can't cleanup gstreamer_manager");
             }
@@ -155,7 +152,11 @@ mod imp {
                     .build(),
                     Signal::builder("seek-bar-pressed")
                     .flags(glib::SignalFlags::RUN_LAST)
-                    .build(),]
+                    .build(),
+                    Signal::builder("pipeline-built")
+                    .flags(glib::SignalFlags::RUN_LAST)
+                    .build(),
+                    ]
                 });
             SIGNALS.as_ref()
         }
@@ -179,9 +180,7 @@ impl VideoPlayer {
         
         let imp = imp::VideoPlayer::from_obj(&widget);
         
-        if let Ok(mut pipeline) = imp.gstreamer_manager.lock() {
-            *pipeline = Some(VideoPipeline::new());
-        }
+        *imp.gstreamer_manager.lock().unwrap() = VideoPipeline::new();
 
         *imp.continue_timeout.borrow_mut() = false;
         imp.seek_bar.set_auto_timeline_length_handling(false);
@@ -215,13 +214,11 @@ impl VideoPlayer {
             }
             // Updates the seek bar based on the videos position
             if let Some(gstman) = gstman_weak.upgrade() {
-                if let Ok(mut guard) = gstman.lock() {
-                    if let Some(ref mut pipeline) = *guard {
-                        if let Ok(new_value) = pipeline.position_to_percent() {
-                            seek_bar_clone.set_value(new_value);
-                        } else {
-                            eprintln!("Pipeline not ready");
-                        }
+                if let Ok(pipeline) = gstman.lock() {
+                    if let Ok(new_value) = pipeline.position_to_percent() {
+                        seek_bar_clone.set_value(new_value);
+                    } else {
+                        eprintln!("Pipeline not ready");
                     }
                 }
             }
@@ -235,16 +232,14 @@ impl VideoPlayer {
         let imp = imp::VideoPlayer::from_obj(self);
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
         if let Some(gstman) = gstman_weak.upgrade() {
-            if let Ok(mut guard) = gstman.lock() {
-                if let Some(ref mut pipeline) = *guard {
-                    // gets seek bar progress 0.0 - 1.0
-                    let percent = imp.seek_bar.get_scale().value() / 100.0;
-                    // Gets precentage time in nanoseconds of the total videos duration
-                    let position = pipeline.percent_to_position(percent).expect("Failed to get position");
-                    println!("Position: {position}");
-                    // Updates the video players position from acquired position
-                    pipeline.seek_position(gstreamer::ClockTime::from_nseconds(position)).expect("Failed to seek position");
-                }
+            if let Ok(mut pipeline) = gstman.lock() {
+                // gets seek bar progress 0.0 - 1.0
+                let percent = imp.seek_bar.get_scale().value() / 100.0;
+                // Gets precentage time in nanoseconds of the total videos duration
+                let position = pipeline.percent_to_position(percent).expect("Failed to get position");
+                println!("Position: {position}");
+                // Updates the video players position from acquired position
+                pipeline.seek_position(gstreamer::ClockTime::from_nseconds(position)).expect("Failed to seek position");
             }
         }
     }
@@ -340,26 +335,23 @@ impl VideoPlayer {
                                 text.set_label(&from_str);
                                 println!("File accepted: {}", from_str);
                                 if let Some(gstman) = gstman_weak_clone.upgrade() {
-                                    if let Ok(mut guard) = gstman.lock() {
-                                        if let Some(ref mut pipeline) = *guard {
-                                            pipeline.reset();
-                                            pipeline.build_pipeline(Some(&text.label().to_string()));
-                                            let paintable = pipeline.get_paintable();
-                                            pic.set_paintable(Some(&paintable));
-                                            let scale = seekbar.get_scale();
-                                            this.start_updating_scale(&scale);
-                                            let timeline_length = pipeline.get_length().unwrap();
-                                            seekbar.set_timeline_length(timeline_length);
-                                            let nanos: &dyn ToValue = &timeline_length;
-                                            this.emit_by_name::<()>("timeline-length-acquired", &[nanos]);
-                                            this.set_controls(true);
-                                            this.set_scale_interation(true);
-                                        } else {
-                                            eprintln!("No Video Pipeline available");
-                                        }
+                                    if let Ok(mut pipeline) = gstman.lock() {
+                                        pipeline.reset();
+                                        pipeline.build_pipeline(Some(&text.label().to_string()));
+                                        let paintable = pipeline.get_paintable();
+                                        pic.set_paintable(Some(&paintable));
+                                        let scale = seekbar.get_scale();
+                                        this.start_updating_scale(&scale);
+                                        let timeline_length = pipeline.get_length().unwrap();
+                                        seekbar.set_timeline_length(timeline_length);
+                                        let nanos: &dyn ToValue = &timeline_length;
+                                        this.emit_by_name::<()>("timeline-length-acquired", &[nanos]);
+                                        this.set_controls(true);
+                                        this.set_scale_interation(true);
                                     } else {
                                         eprintln!("Failed to aquire lock on Video pipeline");
                                     }
+                                    this.emit_by_name::<()>("pipeline-built", &[]);
                                 }
                             }
                         }
@@ -378,12 +370,8 @@ impl VideoPlayer {
             #[strong] gstman_weak,
             move |_| {
                 if let Some(gstman) = gstman_weak.upgrade() {
-                    if let Ok(mut guard) = gstman.lock() {
-                        if let Some(ref mut pipeline) = *guard {
-                            pipeline.frame_backward();
-                        } else {
-                            eprintln!("No Video Pipeline available");
-                        }
+                    if let Ok(mut pipeline) = gstman.lock() {
+                        pipeline.frame_backward();
                     } else {
                         eprintln!("Failed to aquire lock on Video pipeline");
                     }
@@ -397,13 +385,8 @@ impl VideoPlayer {
             #[strong] gstman_weak,
             move |_| {
                 if let Some(gstman) = gstman_weak.upgrade() {
-                    if let Ok(mut guard) = gstman.lock() {
-                        if let Some(ref mut pipeline) = *guard {
-                            pipeline.play_video();
-                            
-                        } else {
-                            eprintln!("No Video Pipeline available");
-                        }
+                    if let Ok(mut pipeline) = gstman.lock() {
+                        pipeline.play_video();
                     } else {
                         eprintln!("Failed to aquire lock on Video pipeline");
                     }
@@ -421,12 +404,8 @@ impl VideoPlayer {
                     id.remove();
                 }     
                 if let Some(gstman) = gstman_weak.upgrade() {
-                    if let Ok(mut guard) = gstman.lock() {
-                        if let Some(ref mut pipeline) = *guard {
-                            pipeline.stop_video();
-                        } else {
-                            eprintln!("No Video Pipeline available");
-                        }
+                    if let Ok(mut pipeline) = gstman.lock() {
+                        pipeline.stop_video();
                     } else {
                         eprintln!("Failed to aquire lock on Video pipeline");
                     }
@@ -440,12 +419,8 @@ impl VideoPlayer {
             #[strong] gstman_weak,
             move |_| {
                 if let Some(gstman) = gstman_weak.upgrade() {
-                    if let Ok(mut guard) = gstman.lock() {
-                        if let Some(ref mut pipeline) = *guard {
-                            pipeline.frame_forward();
-                        } else {
-                            eprintln!("No Video Pipeline available");
-                        }
+                    if let Ok(mut pipeline) = gstman.lock() {
+                        pipeline.frame_forward();
                     } else {
                         eprintln!("Failed to aquire lock on Video pipeline");
                     }
@@ -463,11 +438,8 @@ impl VideoPlayer {
                 let gstman = match gstman_weak.upgrade() {
                     Some(val) => val, None => return,
                 };
-                let guard = match gstman.lock() {
+                let mut pipeline = match gstman.lock() {
                     Ok(val) => val, Err(_) => return,
-                };
-                let ref mut pipeline = match &*guard {
-                    Some(val) => val, None => return,
                 };
                 
                 let pos = match pipeline.get_position() {
@@ -492,11 +464,8 @@ impl VideoPlayer {
                 let gstman = match gstman_weak.upgrade() {
                     Some(val) => val, None => return,
                 };
-                let guard = match gstman.lock() {
+                let mut pipeline = match gstman.lock() {
                     Ok(val) => val, Err(_) => return,
-                };
-                let ref mut pipeline = match &*guard {
-                    Some(val) => val, None => return,
                 };
                 let pos = match pipeline.get_position() {
                     Some(time) => time,
@@ -522,7 +491,7 @@ impl VideoPlayer {
     // }
 
     // Gets the video players pipeline
-    pub fn pipeline(&self) -> Weak<Mutex<Option<VideoPipeline>>> {
+    pub fn pipeline(&self) -> Weak<Mutex<VideoPipeline>> {
         let imp = imp::VideoPlayer::from_obj(self);
         Arc::downgrade(&imp.gstreamer_manager)
     }

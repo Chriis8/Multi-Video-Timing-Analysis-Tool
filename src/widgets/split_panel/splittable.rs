@@ -84,6 +84,9 @@ impl SplitTable {
         let selection_model = split_table_column_view.model().and_downcast::<SingleSelection>().unwrap();
         if let Some(selected_segment) = selection_model.selected_item().and_downcast::<VideoSegment>() {
             let selected_index = selection_model.selected();
+            if video_player_position < selected_segment.get_offset(video_player_index as usize) {
+                return Err("Error: Split time set be starting time.".to_string());
+            }
             selected_segment.set_time(video_player_index as usize, video_player_position);
             self.correct_conflicts(video_player_index, selected_index);
             Ok(())
@@ -106,16 +109,19 @@ impl SplitTable {
         };
 
         let start_offset_time_entry = start_time_offset_liststore.item(video_player_index).and_downcast::<TimeEntry>().unwrap();
-        start_offset_time_entry.set_time(video_player_position);
-
+        
         for i in 0..split_table_liststore.n_items() {
             let video_segment = split_table_liststore.item(i).and_downcast::<VideoSegment>().unwrap();
             if i == 0 {
                 let time = video_segment.get_time(video_player_index as usize).unwrap();
-                video_segment.set_duration(video_player_index as usize, time);
+                if video_player_position > time {
+                    return Err("Start time set after segment times. Remove earlier splits.".to_string());
+                }
+                video_segment.set_duration(video_player_index as usize, time - video_player_position);
             }
             video_segment.set_offset(video_player_index as usize, video_player_position);
         }
+        start_offset_time_entry.set_time(video_player_position);
         Ok(())
     }
 
@@ -150,10 +156,23 @@ impl SplitTable {
         let liststore = match liststore_borrow.as_ref() {
             Some(ls) => ls,
             None => return,
-        };        
+        };
+        let start_time_offset_liststore_borrow = imp.start_time_offset_liststore.borrow();
+        let start_time_offset_liststore = match start_time_offset_liststore_borrow.as_ref() {
+            Some(stol) => stol,
+            None => return,
+        };
         let new_row_segment = VideoSegment::new("Segment Name");
-        for _ in 0..*imp.max_number_of_video_players.borrow() {
+        for i in 0..*imp.max_number_of_video_players.borrow() {
             new_row_segment.add_empty_segment();
+            let offset: u64 = match start_time_offset_liststore.item(i) {
+                Some(offset_object) => {
+                    offset_object.downcast::<TimeEntry>().unwrap().get_time()
+                },
+                None => 0,
+            };
+            new_row_segment.set_offset(i as usize, offset);
+
         }
         liststore.insert(insert_index, &new_row_segment);
     }

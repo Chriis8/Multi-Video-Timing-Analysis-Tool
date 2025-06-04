@@ -1,24 +1,18 @@
-
-use gio::ListStore;
 use gstreamer::MessageView;
-use gstreamer_video::video_meta::tags::Video;
 use gtk::glib;
 use glib::subclass::Signal;
 use once_cell::sync::Lazy;
 use gtk::subclass::{prelude::*};
-use std::cell::RefCell;
-use gtk::{ColumnView, prelude::*, SingleSelection, Entry, ListItem, FlowBox};
+use gtk::prelude::*;
 use crate::video_pipeline::VideoPipeline;
 use std::sync::{Weak, Arc, Mutex};
 use std::collections::{HashMap, HashSet};
 use gstreamer::ClockTime;
-use glib::{Object, SourceId};
+use glib::Object;
+use gstreamer::bus::BusWatchGuard;
 
 
 mod imp {
-    use glib::Source;
-    use gstreamer::bus::BusWatchGuard;
-
     use super::*;
 
     #[derive(Default)]

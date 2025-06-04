@@ -32,7 +32,9 @@ mod imp {
         
         pub is_dragging: Rc<Cell<bool>>,
         
-        pub id: Cell<u32>,
+        pub id: RefCell<String>,
+
+        pub color: RefCell<String>,
         
         #[template_child]
         pub vbox: TemplateChild<Box>,
@@ -140,7 +142,7 @@ mod imp {
             static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
                 vec![Signal::builder("split-button-clicked")
                     .flags(glib::SignalFlags::RUN_LAST)
-                    .param_types([u32::static_type(), u64::static_type()])
+                    .param_types([String::static_type(), u64::static_type()])
                     .build(),
                     Signal::builder("timeline-length-acquired")
                     .flags(glib::SignalFlags::RUN_LAST)
@@ -148,7 +150,7 @@ mod imp {
                     .build(),
                     Signal::builder("set-start-button-clicked")
                     .flags(glib::SignalFlags::RUN_LAST)
-                    .param_types([u32::static_type(), u64::static_type()])
+                    .param_types([String::static_type(), u64::static_type()])
                     .build(),
                     Signal::builder("seek-bar-pressed")
                     .flags(glib::SignalFlags::RUN_LAST)
@@ -175,7 +177,7 @@ glib::wrapper! {
 // Custom widget that includes the open file navigation, main video, media control, split button
 impl VideoPlayer {
     // Creates new video player widget
-    pub fn new(id: u32) -> Self {
+    pub fn new(id: &str) -> Self {
         let widget: Self = glib::Object::new::<Self>();
         
         let imp = imp::VideoPlayer::from_obj(&widget);
@@ -186,7 +188,8 @@ impl VideoPlayer {
         imp.seek_bar.set_auto_timeline_length_handling(false);
 
         imp.seek_bar.update_marks_on_width_change_timeout();
-        imp.id.set(id);
+        *imp.id.borrow_mut() = id.to_string();
+        *imp.color.borrow_mut() = "black".to_string();
 
         println!("created video player widget");
         widget
@@ -218,7 +221,7 @@ impl VideoPlayer {
                     if let Ok(new_value) = pipeline.position_to_percent() {
                         seek_bar_clone.set_value(new_value);
                     } else {
-                        eprintln!("Pipeline not ready");
+                        eprintln!("Could not acquire pipeline in start_updating_scale");
                     }
                 }
             }
@@ -232,7 +235,7 @@ impl VideoPlayer {
         let imp = imp::VideoPlayer::from_obj(self);
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
         if let Some(gstman) = gstman_weak.upgrade() {
-            if let Ok(mut pipeline) = gstman.lock() {
+            if let Ok(pipeline) = gstman.lock() {
                 // gets seek bar progress 0.0 - 1.0
                 let percent = imp.seek_bar.get_scale().value() / 100.0;
                 // Gets precentage time in nanoseconds of the total videos duration
@@ -370,7 +373,7 @@ impl VideoPlayer {
             #[strong] gstman_weak,
             move |_| {
                 if let Some(gstman) = gstman_weak.upgrade() {
-                    if let Ok(mut pipeline) = gstman.lock() {
+                    if let Ok(pipeline) = gstman.lock() {
                         pipeline.frame_backward();
                     } else {
                         eprintln!("Failed to aquire lock on Video pipeline");
@@ -385,7 +388,7 @@ impl VideoPlayer {
             #[strong] gstman_weak,
             move |_| {
                 if let Some(gstman) = gstman_weak.upgrade() {
-                    if let Ok(mut pipeline) = gstman.lock() {
+                    if let Ok(pipeline) = gstman.lock() {
                         pipeline.play_video();
                     } else {
                         eprintln!("Failed to aquire lock on Video pipeline");
@@ -404,7 +407,7 @@ impl VideoPlayer {
                     id.remove();
                 }     
                 if let Some(gstman) = gstman_weak.upgrade() {
-                    if let Ok(mut pipeline) = gstman.lock() {
+                    if let Ok(pipeline) = gstman.lock() {
                         pipeline.stop_video();
                     } else {
                         eprintln!("Failed to aquire lock on Video pipeline");
@@ -419,7 +422,7 @@ impl VideoPlayer {
             #[strong] gstman_weak,
             move |_| {
                 if let Some(gstman) = gstman_weak.upgrade() {
-                    if let Ok(mut pipeline) = gstman.lock() {
+                    if let Ok(pipeline) = gstman.lock() {
                         pipeline.frame_forward();
                     } else {
                         eprintln!("Failed to aquire lock on Video pipeline");
@@ -438,7 +441,7 @@ impl VideoPlayer {
                 let gstman = match gstman_weak.upgrade() {
                     Some(val) => val, None => return,
                 };
-                let mut pipeline = match gstman.lock() {
+                let pipeline = match gstman.lock() {
                     Ok(val) => val, Err(_) => return,
                 };
                 
@@ -450,7 +453,7 @@ impl VideoPlayer {
                     }
                 };
                 let nanos: &dyn ToValue = &pos.nseconds();
-                let id: &dyn ToValue = &imp.id.get();
+                let id: &dyn ToValue = &imp.id.borrow().to_value();
                 this.emit_by_name::<()>("split_button_clicked", &[id, nanos]);
             }
         ));
@@ -464,7 +467,7 @@ impl VideoPlayer {
                 let gstman = match gstman_weak.upgrade() {
                     Some(val) => val, None => return,
                 };
-                let mut pipeline = match gstman.lock() {
+                let pipeline = match gstman.lock() {
                     Ok(val) => val, Err(_) => return,
                 };
                 let pos = match pipeline.get_position() {
@@ -475,7 +478,7 @@ impl VideoPlayer {
                     }
                 };
                 let nanos: &dyn ToValue = &pos.nseconds();
-                let id: &dyn ToValue = &imp.id.get();
+                let id: &dyn ToValue = &imp.id.borrow().to_value();
                 this.emit_by_name::<()>("set-start-button-clicked", &[id, nanos]);
             }
         ));
@@ -520,5 +523,20 @@ impl VideoPlayer {
         let imp = self.imp();
         let sb = imp.seek_bar.get();
         return Some(sb);
+    }
+
+    pub fn get_id(&self) -> String {
+        let imp = self.imp();
+        imp.id.borrow().to_string()
+    }
+
+    pub fn set_color(&self, color: &str) {
+        let imp = self.imp();
+        *imp.color.borrow_mut() = color.to_string();
+    }
+
+    pub fn get_color(&self) -> String {
+        let imp = self.imp();
+        imp.color.borrow().to_string()
     }
 }

@@ -1,15 +1,11 @@
-use glib::random_int;
 use gtk::prelude::*;
 use gtk::glib;
 use gtk::subclass::prelude::*;
 use gtk::CompositeTemplate;
 use gtk::{Label, Overlay, Box, Scale, TemplateChild, Fixed};
-use std::collections::HashSet;
 use std::{cell::{RefCell, Cell}, collections::HashMap};
 use std::rc::Rc;
 use crate::widgets::split_panel::timeentry::TimeEntry;
-use glib::{SourceId, source};
-use gtk::prelude::WidgetExtManual;
 
 mod imp {
 

@@ -5,15 +5,11 @@ use gtk::subclass::prelude::*;
 use imp::Segment;
 use std::cell::RefCell;
 use crate::widgets::split_panel::timeentry::TimeEntry;
-use std::rc::Rc;
+use std::collections::HashMap;
+use std::u64;
+use glib::{value::ToValue, ParamSpecBuilderExt};
 
 mod imp {
-    use std::u64;
-
-    use glib::{value::ToValue, ParamSpecBuilderExt};
-
-    use crate::widgets::split_panel::timeentry;
-
     use super::*;
     
     #[derive(Clone)]
@@ -26,7 +22,7 @@ mod imp {
     #[derive(Default)]
     pub struct VideoSegment {
         pub name: RefCell<String>,
-        pub segments: RefCell<Vec<Segment>>,
+        pub segments: RefCell<HashMap<String, Segment>>,
     }
     
     #[gtk::glib::object_subclass]
@@ -36,7 +32,7 @@ mod imp {
     }
 
     impl VideoSegment {
-        fn notify_time_relative(&self, index: usize) {
+        fn notify_time_relative(&self, index: &str) {
             let prop_name = format!("relative-time-{}", index);
             self.obj().notify(&prop_name);
         }
@@ -54,7 +50,7 @@ mod imp {
                             .flags(glib::ParamFlags::READWRITE)
                             .build()
                     ];
-                    for i in 0..6 {
+                    for i in 1..7 {
                         props.push(glib::ParamSpecUInt64::builder(&format!("time-{}", i))
                             .nick(&format!("Time {}", i))
                             .blurb("Segment Time")
@@ -101,27 +97,27 @@ mod imp {
             match pspec.name() {
                 "name" => self.name.borrow().to_value(),
                 n if n.starts_with("time-") => {
-                    let i = n["time-".len()..].parse::<usize>().unwrap();
+                    let id = &n["time-".len()..];
                     let segments_ref = self.segments.borrow();
-                    let time_entry = &segments_ref[i].time;
+                    let time_entry = &segments_ref.get(id).unwrap().time;
                     time_entry.get_time().to_value()
                 }
                 n if n.starts_with("duration-") => {
-                    let i = n["duration-".len()..].parse::<usize>().unwrap();
-                    let val = self.segments.borrow().get(i).and_then(|v| v.duration).unwrap_or(u64::MAX);
+                    let id = &n["duration-".len()..];
+                    let val = self.segments.borrow().get(id).and_then(|v| v.duration).unwrap_or(u64::MAX);
                     val.to_value()
                 }
                 n if n.starts_with("offset-") => {
-                    let i = n["offset-".len()..].parse::<usize>().unwrap();
+                    let id = &n["offset-".len()..];
                     let segments_ref = self.segments.borrow();
-                    let offset = &segments_ref[i].offset;
+                    let offset = &segments_ref.get(id).unwrap().offset;
                     offset.get_time().to_value()
                 }
                 n if n.starts_with("relative-time-") => {
-                    let i = n["relative-time-".len()..].parse::<usize>().unwrap();
+                    let id = &n["relative-time-".len()..];
                     let segments_ref = self.segments.borrow();
-                    let offset = segments_ref[i].offset.get_time();
-                    let time = self.segments.borrow()[i].time.get_time();
+                    let offset = segments_ref.get(id).unwrap().offset.get_time();
+                    let time = segments_ref.get(id).unwrap().time.get_time();
                     if time == u64::MAX {
                         return time.to_value();
                     } else {
@@ -141,33 +137,37 @@ mod imp {
                     self.notify(pspec);
                 }
                 n if n.starts_with("time-") => {
-                    let i = n["time-".len()..].parse::<usize>().unwrap();
+                    let id = &n["time-".len()..];
                     let segments = &mut self.segments.borrow_mut();
-                    if i < segments.len() {
+                    if segments.contains_key(id) {
                         let raw = value.get::<u64>().unwrap_or_default();
-                        segments[i].time.set_time(raw);
+                        segments.get(id).unwrap().time.set_time(raw);
                         self.notify(pspec);
                         self.notify(pspec);
-                        self.notify_time_relative(i);
+                        self.notify_time_relative(id);
                     }
                 }
                 n if n.starts_with("duration-") => {
-                    let i = n["duration-".len()..].parse::<usize>().unwrap();
+                    let id = &n["duration-".len()..];
                     let segments = &mut self.segments.borrow_mut();
-                    if i < segments.len() {
+                    if segments.contains_key(id) {
                         let raw = value.get::<u64>().unwrap_or_default();
-                        segments[i].duration = Some(raw);
+                        if raw == u64::MAX {
+                            segments.get_mut(id).unwrap().duration = None;
+                        } else {
+                            segments.get_mut(id).unwrap().duration = Some(raw);
+                        }
                         self.notify(pspec);
                     }
                 },
                 n if n.starts_with("offset-") => {
-                    let i = n["offset-".len()..].parse::<usize>().unwrap();
+                    let id = &n["offset-".len()..];
                     let segments = &mut self.segments.borrow_mut();
-                    if i < segments.len() {
+                    if segments.contains_key(id) {
                         let raw = value.get::<u64>().unwrap_or_default();
-                        segments[i].offset.set_time(raw);
+                        segments.get(id).unwrap().offset.set_time(raw);
                         self.notify(pspec);
-                        self.notify_time_relative(i);
+                        self.notify_time_relative(id);
                     }
                 }
                 _ => {}
@@ -196,11 +196,11 @@ impl VideoSegment {
         self.property::<String>("name")
     }
     
-    pub fn get_time(&self, video_player_index: usize) -> Option<u64> {
+    pub fn get_time(&self, video_player_index: &str) -> Option<u64> {
         Some(self.property(&format!("time-{}", video_player_index)))
     }
 
-    pub fn get_duration(&self, video_player_index: usize) -> Option<u64> {
+    pub fn get_duration(&self, video_player_index: &str) -> Option<u64> {
         Some(self.property(&format!("duration-{}", video_player_index)))
     }
 
@@ -213,38 +213,58 @@ impl VideoSegment {
         self.set_property("name", new_name);
     }
 
-    pub fn add_empty_segment(&self) -> Segment {
+    pub fn add_empty_segment(&self, id: &str) -> Segment {
         let imp = imp::VideoSegment::from_obj(self);
         let new_segment = Segment {
             time: TimeEntry::new(u64::MAX),
             duration: None,
             offset: TimeEntry::new(0),
         };
-        imp.segments.borrow_mut().push(new_segment.clone());
+        imp.segments.borrow_mut().insert(id.to_string(), new_segment.clone());
         new_segment
     }
 
-    pub fn set_time(&self, video_player_index: usize, time: u64) {
+    pub fn set_time(&self, video_player_id: &str, time: u64) {
         println!("Setting times to {time}");
-        self.set_property(&format!("time-{}", video_player_index), time);
+        self.set_property(&format!("time-{}", video_player_id), time);
     }
 
-    pub fn set_duration(&self, video_player_index: usize, duration: u64) {
-        self.set_property(&format!("duration-{}", video_player_index), duration);
+    pub fn set_duration(&self, video_player_id: &str, duration: u64) {
+        self.set_property(&format!("duration-{}", video_player_id), duration);
     }
 
-    pub fn get_time_entry_copy(&self, video_player_index: usize) -> TimeEntry {
+    pub fn get_time_entry_copy(&self, video_player_id: &str) -> TimeEntry {
         let imp = imp::VideoSegment::from_obj(self);
-        let time_entry = imp.segments.borrow()[video_player_index].time.clone();
+        let time_entry = imp.segments.borrow().get(video_player_id).unwrap().time.clone();
         time_entry
     }
 
-    pub fn set_offset(&self, video_player_index: usize, offset: u64) {
-        println!("Setting {video_player_index} offset to: {offset}");
-        self.set_property(&format!("offset-{}", video_player_index), offset);
+    pub fn set_offset(&self, video_player_id: &str, offset: u64) {
+        println!("Setting {video_player_id} offset to: {offset}");
+        self.set_property(&format!("offset-{}", video_player_id), offset);
     }
 
-    pub fn get_offset(&self, video_player_index: usize) -> u64 {
-        self.property(&format!("offset-{}", video_player_index))
+    pub fn get_offset(&self, video_player_id: &str) -> u64 {
+        self.property(&format!("offset-{}", video_player_id))
+    }
+
+    pub fn reset_segment(&self, video_player_id: &str) {
+        let imp = self.imp();
+        self.set_time(video_player_id, u64::MAX);
+        self.set_duration(video_player_id, u64::MAX);
+        self.set_offset(video_player_id, 0);
+        let new_segment = Segment {
+            time: TimeEntry::new(u64::MAX),
+            duration: None,
+            offset: TimeEntry::new(0),
+        };
+        imp.segments.borrow_mut().insert(video_player_id.to_string(), new_segment);
+    }
+
+    pub fn get_keys(&self) -> Vec<String> {
+        let imp = self.imp();
+        let segment_borrow = imp.segments.borrow();
+        let keys = segment_borrow.keys();
+        return keys.cloned().collect::<Vec<String>>();
     }
 }

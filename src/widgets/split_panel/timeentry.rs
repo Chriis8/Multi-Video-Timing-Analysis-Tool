@@ -1,4 +1,4 @@
-use glib::{object::ObjectExt, subclass::types::ObjectSubclassExt};
+use glib::object::ObjectExt;
 
 mod imp {
     use gtk::glib;
@@ -98,5 +98,5 @@ impl TimeEntry {
 
     // fn set_old_time(&self, time: u64) {
     //     self.set_property("old-time", time);
-    // } 
+    // }
 }

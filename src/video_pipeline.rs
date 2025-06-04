@@ -1,5 +1,5 @@
-use std::{cell::RefCell, time::Duration};
-use gstreamer::{event::{Seek, Step}, prelude::*, ClockTime, CoreError, ErrorMessage, Pipeline, SeekFlags, SeekType, StateChangeReturn, StateChangeSuccess};
+use std::{cell::RefCell};
+use gstreamer::{event::{Seek, Step}, prelude::*, ClockTime, Pipeline, SeekFlags, SeekType };
 use gtk;
 use gtk::gdk;
 

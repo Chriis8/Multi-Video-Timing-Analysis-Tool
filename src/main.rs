@@ -203,8 +203,8 @@ fn build_ui(app: &Application) -> Builder {
         // Adds two columns to split table for each new video player
         // Column 1: (Time) Split time -> time since the start of the clip
         // Column 2: (Duration) Segment time -> time since the last split
-        split_table_clone.add_column(video_player_id.to_string().as_str(), video_player_id.as_str(), &format!("relative-time-{}", video_player_id));
-        split_table_clone.add_column(video_player_id.to_string().as_str(), video_player_id.as_str(), &format!("duration-{}", video_player_id));
+        split_table_clone.add_column(video_player_id.to_string().as_str(), video_player_id.as_str(), "relative-time");
+        split_table_clone.add_column(video_player_id.to_string().as_str(), video_player_id.as_str(), "duration");
 
         // Updates formatting of the video players and adds the new video player to the container
         let number_of_columns = (count as u32 + 1).clamp(1,3);

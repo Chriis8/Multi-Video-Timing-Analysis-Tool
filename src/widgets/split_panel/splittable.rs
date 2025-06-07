@@ -11,6 +11,7 @@ use crate::helpers::format::format_clock;
 use crate::helpers::parse::{string_to_nseconds, validate_split_table_entry};
 use crate::widgets::video_player_widget::video_player::VideoPlayer;
 use std::collections::HashMap;
+use crate::widgets::split_panel::videosegmentproxy::VideoSegmentProxy;
 
 
 mod imp {
@@ -108,7 +109,7 @@ impl SplitTable {
         for i in 0..split_table_liststore.n_items() {
             let video_segment = split_table_liststore.item(i).and_downcast::<VideoSegment>().unwrap();
             if i == 0 {
-                let time = video_segment.get_time(video_player_id).unwrap();
+                let time = video_segment.get_time(video_player_id);
                 if video_player_position > time {
                     return Err("Start time set after segment times. Remove earlier splits.".to_string());
                 }
@@ -207,13 +208,13 @@ impl SplitTable {
             let current_video_segment = liststore.item(i).and_downcast::<VideoSegment>().unwrap();
             let current_time = current_video_segment.get_time(video_player_id);
             let current_duration = current_video_segment.get_duration(video_player_id);
-            if let (Some(time), Some(_duration)) = (current_time, current_duration) {
-                if time == u64::MAX {
-                    continue;
-                }
-                current_video_segment.set_duration(video_player_id, time - previous_time);
-                previous_time = time;
+            
+            if current_time == u64::MAX {
+                continue;
             }
+            current_video_segment.set_duration(video_player_id, current_time - previous_time);
+            previous_time = current_time;
+            
         }
     }
 
@@ -227,10 +228,9 @@ impl SplitTable {
     
     for i in (0..row_index).rev() {
         let item = liststore.item(i).and_downcast::<VideoSegment>().unwrap();
-        if let Some(time) = item.get_time(video_player_id) {
-            if time != u64::MAX {
-                return Some(time);
-            }
+        let time = item.get_time(video_player_id);
+        if time != u64::MAX {
+            return Some(time);
         }
     }
     return None;
@@ -245,37 +245,29 @@ impl SplitTable {
         };
 
         let starting_row = liststore.item(starting_row_index).and_downcast::<VideoSegment>().unwrap();
-        let starting_row_time = starting_row.get_time(video_player_id).unwrap();
+        let starting_row_time = starting_row.get_time(video_player_id);
         for i in (0..starting_row_index).rev() {
             let current_row = liststore.item(i).and_downcast::<VideoSegment>().unwrap();
-            match current_row.get_time(video_player_id) {
-                Some(time) => {
-                    if time == u64::MAX {
-                        continue;
-                    }
-                    if time > starting_row_time {
-                        current_row.set_time(video_player_id, starting_row_time);
-                    } else {
-                        break;
-                    }
-                }
-                None => { }
+            let time = current_row.get_time(video_player_id);
+            if time == u64::MAX {
+                continue;
+            }
+            if time > starting_row_time {
+                current_row.set_time(video_player_id, starting_row_time);
+            } else {
+                break;
             }
         }
         for i in starting_row_index+1..liststore.n_items() {
             let current_row = liststore.item(i).and_downcast::<VideoSegment>().unwrap();
-            match current_row.get_time(video_player_id) {
-                Some(time) => {
-                    if time == u64::MAX {
-                        continue;
-                    }
-                    if time < starting_row_time {
-                        current_row.set_time(video_player_id, starting_row_time);
-                    } else {
-                        break;
-                    }
-                }
-                None => { }
+            let time = current_row.get_time(video_player_id);
+            if time == u64::MAX {
+                continue;
+            }
+            if time < starting_row_time {
+                current_row.set_time(video_player_id, starting_row_time);
+            } else {
+                break;
             }
         }
         self.update_durations(video_player_id, 0);
@@ -295,7 +287,7 @@ impl SplitTable {
         }; 
 
         
-        let video_player_id = video_player_id.to_string();
+        let video_id = video_player_id.to_string();
         let factory = gtk::SignalListItemFactory::new();
         let liststore_clone = liststore.clone();
         let property = property_name.to_string();
@@ -315,9 +307,10 @@ impl SplitTable {
                 #[weak(rename_to = entry)] entry,
                 #[weak(rename_to = list_item)] list_item,
                 #[weak(rename_to = liststore)] liststore_clone,
-                #[strong] video_player_id,
+                #[strong] video_id,
                 move |_| {
                     if let Some(video_segment) = list_item.item().and_downcast::<VideoSegment>() {
+                        let proxy = VideoSegmentProxy::new(&video_segment, video_id.as_str(), property.as_str());
                         match &property {
                             prop if prop.starts_with("name") => {
                                 // do name stuff here
@@ -328,12 +321,13 @@ impl SplitTable {
                                 let row_index = liststore.find(&video_segment).unwrap();
                                 let valid_entry = validate_split_table_entry(&entry);
                                 if !valid_entry { // Restores segment data if invalid entry
-                                    let stored_entry_data = video_segment.property(property.as_str());
+                                    let stored_entry_data: u64 = proxy.property("value");
                                     entry.set_text(format_clock(stored_entry_data).as_str());
                                 } else { // updates segment data with new entry and fixes any conflicts
                                     let new_time = string_to_nseconds(&entry.text().to_string()).unwrap();
-                                    video_segment.set_time(video_player_id.as_str(), new_time);
-                                    this.correct_conflicts(video_player_id.as_str(), row_index);
+                                    //this should set relative time not normal time
+                                    video_segment.set_time(video_id.as_str(), new_time);
+                                    this.correct_conflicts(video_id.as_str(), row_index);
                                 }
                             }
                             prop if prop.starts_with("duration-") => {
@@ -341,17 +335,17 @@ impl SplitTable {
                                 let row_index = liststore.find(&video_segment).unwrap();
                                 let valid_entry = validate_split_table_entry(&entry);
                                 if !valid_entry {// Restores segment data if invalid entry
-                                    let stored_entry_data = video_segment.property(property.as_str());
+                                    let stored_entry_data: u64 = proxy.property("value");
                                     entry.set_text(format_clock(stored_entry_data).as_str());
                                 } else { // updates segment data with new entry and fixes any conflicts
                                     let new_duration = string_to_nseconds(&entry.text().to_string()).unwrap();
-                                    video_segment.set_duration(video_player_id.as_str(), new_duration);
-                                    let previous_time: u64 = match this.get_previous_time(video_player_id.as_str(), row_index) {
+                                    video_segment.set_duration(video_id.as_str(), new_duration);
+                                    let previous_time: u64 = match this.get_previous_time(video_id.as_str(), row_index) {
                                         Some(time) => time,
                                         None => 0,
                                     };
-                                    video_segment.set_time(video_player_id.as_str(), previous_time + new_duration);
-                                    this.correct_conflicts(video_player_id.as_str(), row_index);
+                                    video_segment.set_time(video_id.as_str(), previous_time + new_duration);
+                                    this.correct_conflicts(video_id.as_str(), row_index);
                                 }
                             }
                             _ => {
@@ -381,14 +375,20 @@ impl SplitTable {
 
         // Binds the stored data to the displayed entry objects
         let property = property_name.to_string();
+        let video_id = video_player_id.to_string();
         factory.connect_bind(move |_, list_item| {
             let item = list_item.item().and_then(|obj| obj.downcast::<VideoSegment>().ok()).expect("The item is not a VideoSegment");
             let entry = list_item.child().and_then(|child| child.downcast::<Entry>().ok()).expect("The child widget is not Entry");
+            let proxy = VideoSegmentProxy::new(&item, &video_id, &property);
+            //AKSDJLAKSJDLKASJDLKASDLKJASLDKJLASDKJASLKJLASDK
             // Binds the u64 stored in the video segment to the entries formatted clock
             // Any changes to the videosegment will be updated in the entry object
-            item.bind_property(&property, &entry, "text")
+            proxy.bind_property("value", &entry, "text")
                 .flags(glib::BindingFlags::DEFAULT | glib::BindingFlags::SYNC_CREATE)
                 .transform_to(move |_, value: u64| { 
+                    println!("-----------------transform in column bind--------------");
+                    let clock = format_clock(value);
+                    println!("---------Value: {value} ------------- = Clocktime: {clock}");
                     Some(format_clock(value).to_value())
                 })
                 .build();

@@ -252,8 +252,7 @@ mod imp {
                         let last_mark_position = split_table_liststore.item(split_table_liststore.n_items() - 1)
                             .and_downcast::<VideoSegment>()
                             .unwrap()
-                            .get_time(video_player_id.to_string().as_str())
-                            .unwrap();
+                            .get_time(video_player_id.to_string().as_str());
 
                         starts.push(ClockTime::from_seconds(0));
                         ends.push(ClockTime::from_nseconds(last_mark_position));
@@ -446,9 +445,10 @@ mod imp {
                         let video_player_id = video_player.get_id();
                         let selection_model = split_table.model().and_downcast::<SingleSelection>().unwrap();
                         if let Some(selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
-                            let time = selection.get_time(video_player_id.to_string().as_str()).and_then(|nanos| Some(ClockTime::from_nseconds(nanos))).unwrap();
-                            if let Ok(_result) = pipeline.seek_position(time) {
-                                println!("Shared pipeline seek for video player {video_player_id} to position {time}");
+                            let time = selection.get_time(video_player_id.to_string().as_str());
+                            let clock_time = ClockTime::from_nseconds(time);
+                            if let Ok(_result) = pipeline.seek_position(clock_time) {
+                                println!("Shared pipeline seek for video player {video_player_id} to position {clock_time}");
                             }
                         }
                     }

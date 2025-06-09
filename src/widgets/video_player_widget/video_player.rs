@@ -27,8 +27,6 @@ mod imp {
         pub gstreamer_manager: Arc<Mutex<VideoPipeline>>,
 
         pub timeout_id: Rc<RefCell<Option<glib::SourceId>>>,
-
-        pub continue_timeout: RefCell<bool>,
         
         pub is_dragging: Rc<Cell<bool>>,
         
@@ -80,6 +78,9 @@ mod imp {
 
         #[template_child]
         pub set_start_time_button: TemplateChild<Button>,
+
+        #[template_child]
+        pub remove_video_player_button: TemplateChild<Button>,
     }
     
     #[gtk::glib::object_subclass]
@@ -122,9 +123,11 @@ mod imp {
     
     impl ObjectImpl for VideoPlayer {
         fn dispose(&self) {
+            if let Some(timeout) = self.timeout_id.borrow_mut().take() {
+                timeout.remove();
+            }
             if let Ok(mut pipeline) = self.gstreamer_manager.lock() {
                 println!("pipeline cleanup");
-                *self.continue_timeout.borrow_mut() = false;
                 pipeline.cleanup();
             } else {
                 eprintln!("Can't cleanup gstreamer_manager");
@@ -158,6 +161,9 @@ mod imp {
                     Signal::builder("pipeline-built")
                     .flags(glib::SignalFlags::RUN_LAST)
                     .build(),
+                    Signal::builder("remove-video-player")
+                    .flags(glib::SignalFlags::RUN_LAST)
+                    .build(),
                     ]
                 });
             SIGNALS.as_ref()
@@ -184,7 +190,6 @@ impl VideoPlayer {
         
         *imp.gstreamer_manager.lock().unwrap() = VideoPipeline::new();
 
-        *imp.continue_timeout.borrow_mut() = false;
         imp.seek_bar.set_auto_timeline_length_handling(false);
 
         imp.seek_bar.update_marks_on_width_change_timeout();
@@ -202,14 +207,8 @@ impl VideoPlayer {
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
         let seek_bar_clone = scale.clone();
         let is_dragging_clone = imp.is_dragging.clone();
-        *imp.continue_timeout.borrow_mut() = true;
-        let to_continue = imp.continue_timeout.clone();
         // Sets up timeout to update the seekbar every 100 milliseconds
         let source_id = timeout_add_local(Duration::from_millis(100), move || {
-            if !*to_continue.borrow() {
-                println!("breaking update scale timeout");
-                return glib::ControlFlow::Break
-            }
             // Skips update if user is moving the seek bar
             if is_dragging_clone.get() {
                 println!("Dragging, skipping update scale");
@@ -364,6 +363,13 @@ impl VideoPlayer {
                     }
                     obj.destroy();
                 });
+            }
+        ));
+
+        imp.remove_video_player_button.connect_clicked(glib::clone!(
+            #[weak(rename_to = this)] self,
+            move |_| {
+                this.emit_by_name::<()>("remove-video-player", &[]);
             }
         ));
 

@@ -16,6 +16,8 @@ use crate::widgets::split_panel::videosegmentproxy::VideoSegmentProxy;
 
 mod imp {
 
+    use gtk::ColumnViewColumn;
+
     use super::*;
 
     #[derive(Default)]
@@ -25,6 +27,7 @@ mod imp {
         pub start_time_offset_column_view: RefCell<Option<ColumnView>>,
         pub start_time_offset_liststore: RefCell<Option<ListStore>>,
         pub start_time_offset_row_map: RefCell<HashMap<String, TimeEntry>>,
+        pub split_table_columns: RefCell<HashMap<String, ColumnViewColumn>>,
     }
     
     #[gtk::glib::object_subclass]
@@ -113,7 +116,9 @@ impl SplitTable {
                 if video_player_position > time {
                     return Err("Start time set after segment times. Remove earlier splits.".to_string());
                 }
-                video_segment.set_duration(video_player_id, time - video_player_position);
+                if time != u64::MAX {
+                    video_segment.set_duration(video_player_id, time - video_player_position);
+                }
             }
             video_segment.set_offset(video_player_id, video_player_position);
         }
@@ -207,7 +212,6 @@ impl SplitTable {
         for i in starting_row_index..number_of_rows {
             let current_video_segment = liststore.item(i).and_downcast::<VideoSegment>().unwrap();
             let current_time = current_video_segment.get_time(video_player_id);
-            let current_duration = current_video_segment.get_duration(video_player_id);
             
             if current_time == u64::MAX {
                 continue;
@@ -394,7 +398,10 @@ impl SplitTable {
                 .build();
         });
 
+        let mut split_table_columns = imp.split_table_columns.borrow_mut();
+        
         let column = gtk::ColumnViewColumn::new(Some(title), Some(factory));
+        split_table_columns.insert(format!("{}-{}", video_player_id, property_name), column.clone());
         column_view.append_column(&column);
     }
 
@@ -593,8 +600,8 @@ impl SplitTable {
                 .unwrap();
             let video_player_id = video_player.get_id().to_string();
             let time = row.get_time_entry_copy(video_player_id.as_str());
-            let row_id = row_count - 1;
-            video_player.connect_time_to_seekbar(format!("video-{i}, row-{row_id}"), time, "black");
+            let row_id = row.get_segment_id();
+            video_player.connect_time_to_seekbar(format!("video-{i}, segment-{row_id}"), time, "black");
         }
     }
 
@@ -615,27 +622,9 @@ impl SplitTable {
         for i in 0..row_count {
             let row = split_table_liststore.item(i).and_downcast::<VideoSegment>().unwrap();
             let time = row.get_time_entry_copy(column_index.as_str());
-            video_player.connect_time_to_seekbar(format!("video-{column_index}, seg-{i}"), time, "black");
+            let segment_id = row.get_segment_id();
+            video_player.connect_time_to_seekbar(format!("video-{column_index}, segment-{segment_id}"), time, "black");
         }
-    }
-
-    pub fn reset_individual_video_segments(&self, video_player_id: &str) {
-        let imp = self.imp();
-        let split_table_liststore_borrow = imp.split_table_liststore.borrow();
-        let split_table_liststore = match split_table_liststore_borrow.as_ref() {
-            Some(ls) => ls,
-            None => return,
-        };
-
-        for i in 0..split_table_liststore.n_items() {
-            let video_segment = split_table_liststore.item(i).and_downcast::<VideoSegment>().unwrap();
-            video_segment.reset_segment(video_player_id);
-        }
-    }
-
-    pub fn remove_start_time_offset_from_map(&self, video_player_id: &str) {
-        let imp = self.imp();
-        imp.start_time_offset_row_map.borrow_mut().remove(video_player_id);
     }
 
     pub fn get_offset_time_entry(&self, video_player_id: &str) -> TimeEntry {
@@ -643,5 +632,50 @@ impl SplitTable {
         imp.start_time_offset_row_map.borrow().get(video_player_id).unwrap().clone()
     }
 
+    pub fn remove_column(&self, video_player_id: &str) {
+        let imp = self.imp();
+        let split_table_liststore_borrow = imp.split_table_liststore.borrow();
+        let split_table_liststore = match split_table_liststore_borrow.as_ref() {
+            Some(ls) => ls,
+            None => return,
+        };
+        let split_table_column_view_borrow = imp.split_table_column_view.borrow();
+        let split_table_column_view = match split_table_column_view_borrow.as_ref() {
+            Some(cv) => cv,
+            None => return,
+        };
+        let start_time_offset_liststore_borrow = imp.start_time_offset_liststore.borrow();
+        let start_time_offset_liststore = match start_time_offset_liststore_borrow.as_ref() {
+            Some(stol) => stol,
+            None => return,
+        };
+        let start_time_offset_row_map_borrow = imp.start_time_offset_row_map.borrow();
 
+
+        let mut split_table_columns = imp.split_table_columns.borrow_mut();
+        let time_key = &format!("{}-{}", video_player_id, "relative-time");
+        let duration_key = &format!("{}-{}", video_player_id, "duration");
+        let time_column = split_table_columns.get(time_key).unwrap();
+        let duration_column = split_table_columns.get(duration_key).unwrap();
+
+        split_table_column_view.remove_column(time_column);
+        split_table_column_view.remove_column(duration_column);
+
+        split_table_columns.remove(time_key);
+        split_table_columns.remove(duration_key);
+
+
+        for i in 0..split_table_liststore.n_items() {
+            let segment = split_table_liststore.item(i).and_downcast::<VideoSegment>().unwrap();
+            segment.remove_segment(video_player_id);
+        }
+
+        let offset_time_entry = start_time_offset_row_map_borrow.get(video_player_id).unwrap();
+        match start_time_offset_liststore.find(offset_time_entry) {
+            Some(row_index) => {
+                start_time_offset_liststore.remove(row_index);
+            }
+            None => return,
+        }
+    }
 }

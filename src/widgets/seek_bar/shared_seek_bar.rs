@@ -714,8 +714,8 @@ impl SharedSeekBar {
 
             // id should always be row_count regardless of if the row is inserted in the middle.
             // not sure if it will matter but this should give marks unique ids
-            let row_id = row_count - 1; 
-            imp.seek_bar.add_mark(format!("video-{video_player_id}, row-{row_id}"), time, color.as_str(), offset_time_entry);
+            let segment_id = row.get_segment_id(); 
+            imp.seek_bar.add_mark(format!("video-{video_player_id}, segment-{segment_id}"), time, color.as_str(), offset_time_entry);
         }
     }
 
@@ -746,12 +746,13 @@ impl SharedSeekBar {
             let row = split_table_liststore.item(i).and_downcast::<VideoSegment>().unwrap();
             let time = row.get_time_entry_copy(video_player_id);
             let offset = split_table.get_offset_time_entry(video_player_id);
+            let segment_id = row.get_segment_id();
             // id are given in order as they have already been created
-            imp.seek_bar.add_mark(format!("video-{video_player_id}, seg-{i}"), time, color, offset);
+            imp.seek_bar.add_mark(format!("video-{video_player_id}, segment-{segment_id}"), time, color, offset);
         }
     }
 
-    pub fn update_timeline_length(self) {
+    pub fn update_timeline_length(&self) {
         let imp = self.imp();
         imp.seek_bar.update_timeline_length();
     }
@@ -846,6 +847,27 @@ impl SharedSeekBar {
         imp.play_button.set_sensitive(status);
         imp.previous_frame_button.set_sensitive(status);
         imp.previous_segment_button.set_sensitive(status);
+    }
+
+    pub fn remove_marks(&self, video_player_id: &str) {
+        let imp = self.imp();
+        let split_table_liststore_borrow = imp.split_table_liststore.borrow();
+        let split_table_liststore_ref = match split_table_liststore_borrow.as_ref() {
+            Some(st) => st,
+            None => return,
+        };
+        let split_table_liststore = match split_table_liststore_ref.upgrade() {
+            Some(st) => st,
+            None => return,
+        };
+
+        for i in 0..split_table_liststore.n_items() {
+            let segment = split_table_liststore.item(i).and_downcast::<VideoSegment>().unwrap();
+            let segment_id = segment.get_segment_id();
+            imp.seek_bar.remove_mark(&format!("video-{video_player_id}, segment-{segment_id}"));
+        }
+
+        self.update_timeline_length();
     }
 }
 

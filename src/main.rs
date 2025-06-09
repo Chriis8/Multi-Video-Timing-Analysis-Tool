@@ -180,11 +180,37 @@ fn build_ui(app: &Application) -> Builder {
             move |_| {
                 let pipeline = video_player.pipeline();
                 //split_table.reset_individual_video_segments(video_player_index);
-                sync_man.add_pipeline(pipeline_id.to_string().as_str(), pipeline);
+                sync_man.add_pipeline(pipeline_id.as_str(), pipeline);
                 None
             }
         ));
 
+        new_player.connect_local("remove-video-player", false, glib::clone!(
+            #[strong(rename_to = sync_man)] sync_manager,
+            #[strong(rename_to = pipeline_id)] video_player_id,
+            #[strong(rename_to = video_player)] new_player,
+            #[strong(rename_to = video_player_container)] video_container_clone,
+            #[strong(rename_to = shared_seek_bar)] shared_seek_bar_clone,
+            #[strong(rename_to = split_table)] split_table_clone,
+            move |_| {
+                println!("removing video player");
+                split_table.remove_column(pipeline_id.as_str());
+                shared_seek_bar.remove_marks(pipeline_id.as_str());
+                sync_man.remove_pipeline(pipeline_id.as_str());
+                let count = *unsafe{ get_data::<usize>(&video_player_container, "count").unwrap().as_ref() };
+                store_data(&video_player_container, "count", count - 1);
+                let number_of_columns = ((count as u32).saturating_sub(1)).clamp(1,3);
+                video_player_container.set_max_children_per_line(number_of_columns);
+                video_player_container.set_min_children_per_line(number_of_columns);
+                if let Some(flowbox_child) = video_player.parent().and_then(|x| x.dynamic_cast::<FlowBoxChild>().ok()) {
+                    video_player_container.remove(&flowbox_child);
+                }
+                unsafe{
+                    video_player.run_dispose();
+                }
+                None
+            }
+        ));
         
         // Adds start time offset entry text to start_time_offset liststore/columnview
         let new_start_time_offset_time_entry = match split_table_clone.add_start_time_offset_row(video_player_id.as_str()) {
@@ -198,7 +224,8 @@ fn build_ui(app: &Application) -> Builder {
             #[weak(rename_to = shared_seek_bar)] shared_seek_bar_clone,
             move |_, _| {
                 shared_seek_bar.update_timeline_length();
-            }));
+            }
+        ));
             
         // Adds two columns to split table for each new video player
         // Column 1: (Time) Split time -> time since the start of the clip

@@ -5,7 +5,7 @@ use gtk::subclass::prelude::*;
 use glib::subclass::Signal;
 use imp::Segment;
 use std::cell::RefCell;
-use crate::widgets::split_panel::timeentry::TimeEntry;
+use crate::{helpers::data::get_next_id, widgets::split_panel::timeentry::TimeEntry};
 use std::collections::HashMap;
 use std::u64;
 use glib::{value::ToValue, ParamSpecBuilderExt};
@@ -25,6 +25,7 @@ mod imp {
     #[derive(Default)]
     pub struct VideoSegment {
         pub name: RefCell<String>,
+        pub id: RefCell<String>,
         pub segments: RefCell<HashMap<String, Segment>>,
     }
     
@@ -219,6 +220,7 @@ impl VideoSegment {
         let video_segment: Self = glib::Object::new::<Self>();
         let imp = imp::VideoSegment::from_obj(&video_segment);
         *imp.name.borrow_mut() = name.to_string();
+        *imp.id.borrow_mut() = get_next_id().to_string();
         video_segment
     }
 
@@ -297,23 +299,21 @@ impl VideoSegment {
         //Some(self.property(&format!("offset-{}", video_player_id)))
     }
 
-    pub fn reset_segment(&self, video_player_id: &str) {
-        let imp = self.imp();
-        // self.set_time(video_player_id, u64::MAX);
-        // self.set_duration(video_player_id, u64::MAX);
-        // self.set_offset(video_player_id, 0);
-        let new_segment = Segment {
-            time: TimeEntry::new(u64::MAX),
-            duration: None,
-            offset: TimeEntry::new(0),
-        };
-        imp.segments.borrow_mut().insert(video_player_id.to_string(), new_segment);
-    }
-
     pub fn get_keys(&self) -> Vec<String> {
         let imp = self.imp();
         let segment_borrow = imp.segments.borrow();
         let keys = segment_borrow.keys();
         return keys.cloned().collect::<Vec<String>>();
+    }
+
+    pub fn get_segment_id(&self) -> String {
+        let imp = self.imp();
+        imp.id.borrow().to_string()
+    }
+
+    pub fn remove_segment(&self, video_player_id: &str) {
+        let imp = self.imp();
+        let mut segment_borrow = imp.segments.borrow_mut();
+        segment_borrow.remove(video_player_id);
     }
 }

@@ -20,19 +20,19 @@
                         <property name="margin-bottom">20</property>
                         <property name="margin-end">10</property>
                         <property name="margin-start">10</property>
-    
                         <child>
                             <object class="GtkButton" id="fchooser">
                                 <property name="label">Open File</property>
                             </object>
                         </child>
-
+                        
                         <child>
                             <object class="GtkLabel" id="text_view">
                                 <property name="label">Please, select a mpegts video file.</property>
                                 <property name="ellipsize">PANGO_ELLIPSIZE_MIDDLE</property>
                             </object>
                         </child>
+                        
                     </object>
                 </child>
                 <child>
@@ -97,6 +97,12 @@
                         <child>
                             <object class="GtkButton" id="split_button">
                                 <property name="label">Split</property>
+                            </object>
+                        </child>
+
+                        <child>
+                            <object class="GtkButton" id="remove_video_player_button">
+                                <property name="label">Remove Video Player</property>
                             </object>
                         </child>
                     </object>

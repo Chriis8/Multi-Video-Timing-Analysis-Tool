@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use gstreamer::ClockTime;
 use glib::Object;
 use gstreamer::bus::BusWatchGuard;
+use gstreamer::bus;
 
 
 mod imp {
@@ -105,6 +106,7 @@ impl SyncManager {
         let imp = self.imp();
         imp.pipelines.lock().unwrap().remove(pipeline_id);
         imp.playing_pipelines.lock().unwrap().remove(pipeline_id);
+        imp.buses.lock().unwrap().remove(pipeline_id);
     }
 
     pub fn play_videos(&self, start: Vec<ClockTime>, end: Vec<ClockTime>) {

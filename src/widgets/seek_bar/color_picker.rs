@@ -1,5 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
+#[derive(Clone)]
 pub struct ColorPool {
     available: VecDeque<String>,
     in_use: HashMap<String, String>,

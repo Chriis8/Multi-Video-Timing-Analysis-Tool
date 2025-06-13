@@ -13,6 +13,7 @@ use std::rc::Rc;
 use std::cell::{Cell, RefCell};
 use once_cell::sync::Lazy;
 use crate::widgets::seek_bar::seek_bar::SeekBar;
+use glib::{WeakRef, clone::Downgrade, clone::Upgrade};
 
 mod imp {
     use gtk::{Box, Button, Label, Picture};
@@ -119,10 +120,8 @@ mod imp {
         fn set_scale_interation(&self, status: bool) {
             self.seek_bar.set_sensitive(status);
         }
-    }
-    
-    impl ObjectImpl for VideoPlayer {
-        fn dispose(&self) {
+        pub fn cleanup(&self) {
+            println!("cleaning up Video Player");
             if let Some(timeout) = self.timeout_id.borrow_mut().take() {
                 timeout.remove();
             }
@@ -132,6 +131,12 @@ mod imp {
             } else {
                 eprintln!("Can't cleanup gstreamer_manager");
             }
+        }
+    }
+    
+    impl ObjectImpl for VideoPlayer {
+        fn dispose(&self) {
+            println!("disposing Video Player");
         }
 
         fn constructed(&self) {
@@ -544,5 +549,10 @@ impl VideoPlayer {
     pub fn get_color(&self) -> String {
         let imp = self.imp();
         imp.color.borrow().to_string()
+    }
+
+    pub fn cleanup(&self) {
+        let imp = self.imp();
+        imp.cleanup();
     }
 }

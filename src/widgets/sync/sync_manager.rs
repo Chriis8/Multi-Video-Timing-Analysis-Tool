@@ -109,17 +109,16 @@ impl SyncManager {
         imp.buses.lock().unwrap().remove(pipeline_id);
     }
 
-    pub fn play_videos(&self, start: Vec<ClockTime>, end: Vec<ClockTime>) {
+    pub fn play_videos(&self, clamp_times: HashMap<String, (ClockTime, ClockTime)>) {
         let imp = self.imp();
-        for (i, pipeline_weak) in imp.pipelines.lock().unwrap().values().enumerate() {
+        for (i, pipeline_weak) in imp.pipelines.lock().unwrap().iter() {
             let pipeline = match pipeline_weak.upgrade() {
                 Some(p) => p,
                 None => return,
             };
-            let s = start[i];
-            let e = end[i];
-            println!("Playing video start: {s}, end: {e}");
-            pipeline.lock().unwrap().play_video_clamp(start[i], end[i]);
+            let (start, end) = *clamp_times.get(i).unwrap();
+            println!("Playing video start: {start}, end: {end}");
+            pipeline.lock().unwrap().play_video_clamp(start, end);
         }
     }
 

@@ -31,13 +31,6 @@
                 <property name="margin-bottom">16</property>
 
                 <child>
-                    <object class="GtkButton" id="previous_segment_button">
-                        <style><class name="shared-previous-segment"></class></style>
-                        <property name="label">Previous Segment</property>
-                    </object>
-                </child>
-
-                <child>
                     <object class="GtkButton" id="previous_frame_button">
                         <style><class name="shared-previous-frame"></class></style>
                         <property name="label">Previous Frame</property>
@@ -55,13 +48,6 @@
                     <object class="GtkButton" id="next_frame_button">
                         <style><class name="shared-next-frame"></class></style>
                         <property name="label">Next Frame</property>
-                    </object>
-                </child>
-
-                <child>
-                    <object class="GtkButton" id="next_segment_button">
-                        <style><class name="shared-next-segment"></class></style>
-                        <property name="label">Next Segment</property>
                     </object>
                 </child>
 

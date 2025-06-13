@@ -21,6 +21,7 @@ use crate::helpers::ui::flowbox_children;
 use std::time::Duration;
 use glib::timeout_add_local;
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 
 
 mod imp {
@@ -32,15 +33,11 @@ mod imp {
         #[template_child]
         pub seek_bar: TemplateChild<SeekBar>,
         #[template_child]
-        pub previous_segment_button: TemplateChild<Button>,
-        #[template_child]
         pub previous_frame_button: TemplateChild<Button>,
         #[template_child]
         pub play_button: TemplateChild<Button>,
         #[template_child]
         pub next_frame_button: TemplateChild<Button>,
-        #[template_child]
-        pub next_segment_button: TemplateChild<Button>,
         #[template_child]
         pub jump_to_segment_button: TemplateChild<Button>,
 
@@ -56,6 +53,7 @@ mod imp {
         pub has_control: Rc<Cell<bool>>,
         pub scale_start_instant: Arc<Mutex<Option<Instant>>>,
         pub scale_start_offset: Rc<Cell<f64>>,
+        pub starting_segment: Rc<Cell<u32>>,
     }
 
     #[gtk::glib::object_subclass]
@@ -76,77 +74,9 @@ mod imp {
     impl SharedSeekBar {
         pub fn setup_buttons(&self) {
             println!("------------------setting up buttons");
-            // self.previous_segment_button.connect_clicked(glib::clone!(
-            //     #[strong(rename_to = video_player_container_weak)] self.video_player_container,
-            //     #[strong(rename_to = split_table_weak)] self.split_table,
-            //     #[weak(rename_to = this)] self,
-            //     move |_| {
-            //         let video_player_container_borrow = video_player_container_weak.borrow();
-            //         let video_player_container_ref = match video_player_container_borrow.as_ref() {
-            //             Some(vpc) => vpc,
-            //             None => return,
-            //         };
-            //         let video_player_container = match video_player_container_ref.upgrade() {
-            //             Some(vpc) => vpc,
-            //             None => return,
-            //         };
-            //         let split_table_borrow= split_table_weak.borrow();
-            //         let split_table_ref = match split_table_borrow.as_ref() {
-            //             Some(st) => st,
-            //             None => return,
-            //         };
-            //         let split_table = match split_table_ref.upgrade() {
-            //             Some(st) => st,
-            //             None => return,
-            //         };
-            //         let selection_model = split_table.model().and_downcast::<SingleSelection>().unwrap();
-            //         let selected_index = selection_model.selected();
-            //         let previous_index = selected_index.saturating_sub(1);
-            //         selection_model.set_selected(previous_index);
-            //         for (video_player_index, child) in flowbox_children(&video_player_container).enumerate() {
-            //             let fb_child = match child.downcast_ref::<FlowBoxChild>() {
-            //                 Some(c) => c,
-            //                 None => continue,
-            //             };
-
-            //             let content = match fb_child.child() {
-            //                 Some(c) => c,
-            //                 None => continue,
-            //             };
-
-            //             let video_player = match content.downcast_ref::<VideoPlayer>() {
-            //                 Some(vp) => vp,
-            //                 None => continue,
-            //             };
-
-            //             let arc = match video_player.pipeline().upgrade() {
-            //                 Some(a) => a,
-            //                 None => {
-            //                     eprintln!("Shared jump to segment: Pipeline dropped");
-            //                     continue
-            //                 }
-            //             };
-
-            //             let mut pipeline = match arc.lock() {
-            //                 Ok(g) => g,
-            //                 Err(_) => {
-            //                     eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
-            //                     continue
-            //                 }
-            //             };
-                        
-            //             if let Some(selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
-            //                 let time = selection.get_time(video_player_index).and_then(|nanos| Some(ClockTime::from_nseconds(nanos))).unwrap();
-            //                 if let Ok(result) = pipeline.seek_position(time) {
-            //                     println!("Shared pipeline seek for video player {video_player_index} to position {time}");
-            //                 }
-            //             }
-            //         }
-            //         println!("Pressed shared preivous segment button");
-            //     }
-            // ));
             self.previous_frame_button.connect_clicked(glib::clone!(
                 #[strong(rename_to = video_player_container_weak)] self.video_player_container,
+                #[strong(rename_to = seek_bar)] self.seek_bar,
                 move |_| {
                     let video_player_container_borrow = video_player_container_weak.borrow();
                     let video_player_container_ref = match video_player_container_borrow.as_ref() {
@@ -174,6 +104,12 @@ mod imp {
                             None => continue,
                         };
 
+                        let scale = seek_bar.get_scale();
+                        if scale.value() == 0.0 {
+                            println!("scale is 0 skipping frame backward call");
+                            return;
+                        }
+
                         let arc = match video_player.pipeline().upgrade() {
                             Some(a) => a,
                             None => {
@@ -189,7 +125,7 @@ mod imp {
                                 continue
                             }
                         };
-                        
+
                         pipeline.frame_backward();
                     }
                 }
@@ -202,6 +138,9 @@ mod imp {
                 #[strong(rename_to = scale_start_offset)] self.scale_start_offset,
                 #[strong(rename_to = is_paused)] self.is_paused,
                 #[strong(rename_to = sync_manager_weak)] self.sync_manager,
+                #[strong(rename_to = start_time_offset_liststore_weak)] self.start_time_offset_liststore,
+                #[strong(rename_to = split_table_weak)] self.split_table,
+                #[strong(rename_to = starting_segment)] self.starting_segment,
                 move |_| {
                     let video_player_container_borrow = video_player_container_weak.borrow();
                     let video_player_container_ref = match video_player_container_borrow.as_ref() {
@@ -230,9 +169,18 @@ mod imp {
                         Some(st) => st,
                         None => return,
                     };
+                    let split_table_weak_borrow = split_table_weak.borrow();
+                    let split_table_ref = match split_table_weak_borrow.as_ref() {
+                        Some(st) => st,
+                        None => return,
+                    };
+                    let split_table = match split_table_ref.upgrade() {
+                        Some(st) => st,
+                        None => return,
+                    };
 
-                    let mut starts: Vec<ClockTime> = Vec::new();
-                    let mut ends: Vec<ClockTime> = Vec::new();
+
+                    let mut pipeline_clamp_times: HashMap<String, (ClockTime, ClockTime)> = HashMap::new();
                     for child in flowbox_children(&video_player_container) {
                         let fb_child = match child.downcast_ref::<FlowBoxChild>() {
                             Some(c) => c,
@@ -249,13 +197,20 @@ mod imp {
                             None => continue,
                         };
                         let video_player_id = video_player.get_id();
+                        let start_time_offset = split_table.get_offset_time_entry(video_player_id.as_str()).get_time();
+                        let start_time_for_syncing = if starting_segment.get() == 0 { start_time_offset } else { 
+                            split_table_liststore.item(starting_segment
+                                .get()
+                                .saturating_sub(1))
+                                .and_downcast::<VideoSegment>()
+                                .unwrap()
+                                .get_time(video_player_id.as_str()
+                            )};
                         let last_mark_position = split_table_liststore.item(split_table_liststore.n_items() - 1)
                             .and_downcast::<VideoSegment>()
                             .unwrap()
                             .get_time(video_player_id.to_string().as_str());
-
-                        starts.push(ClockTime::from_seconds(0));
-                        ends.push(ClockTime::from_nseconds(last_mark_position));
+                        pipeline_clamp_times.insert(video_player_id, (ClockTime::from_nseconds(start_time_for_syncing), ClockTime::from_nseconds(last_mark_position)));
                     }
 
                     sync_manager.clear_state();
@@ -269,7 +224,7 @@ mod imp {
                         }
                     ));
 
-                    sync_manager.play_videos(starts, ends);
+                    sync_manager.play_videos(pipeline_clamp_times);
 
                     scale_start_offset.set(seek_bar.get_scale().value());
                     is_paused.set(!is_paused.get());
@@ -277,6 +232,7 @@ mod imp {
             ));
             self.next_frame_button.connect_clicked(glib::clone!(
                 #[strong(rename_to = video_player_container_weak)] self.video_player_container,
+                #[strong(rename_to = seek_bar)] self.seek_bar,
                 move |_| {
                     let video_player_container_borrow = video_player_container_weak.borrow();
                     let video_player_container_ref = match video_player_container_borrow.as_ref() {
@@ -302,6 +258,12 @@ mod imp {
                             Some(vp) => vp,
                             None => continue,
                         };
+
+                        let scale = seek_bar.get_scale();
+                        if scale.value() == 100.0 {
+                            println!("scale is 100 skipping frame forward call");
+                            return;
+                        }
 
                         let arc = match video_player.pipeline().upgrade() {
                             Some(a) => a,
@@ -322,77 +284,22 @@ mod imp {
                     }
                 }
             ));
-            // self.next_segment_button.connect_clicked(glib::clone!(
-            //     #[strong(rename_to = video_player_container_weak)] self.video_player_container,
-            //     #[strong(rename_to = split_table_weak)] self.split_table,
-            //     move |_| {
-            //         let video_player_container_borrow = video_player_container_weak.borrow();
-            //         let video_player_container_ref = match video_player_container_borrow.as_ref() {
-            //             Some(vpc) => vpc,
-            //             None => return,
-            //         };
-            //         let video_player_container = match video_player_container_ref.upgrade() {
-            //             Some(vpc) => vpc,
-            //             None => return,
-            //         };
-            //         let split_table_borrow= split_table_weak.borrow();
-            //         let split_table_ref = match split_table_borrow.as_ref() {
-            //             Some(st) => st,
-            //             None => return,
-            //         };
-            //         let split_table = match split_table_ref.upgrade() {
-            //             Some(st) => st,
-            //             None => return,
-            //         };
-            //         let selection_model = split_table.model().and_downcast::<SingleSelection>().unwrap();
-            //         let selected_index = selection_model.selected();
-            //         let next_index = (selected_index + 1).clamp(0, selection_model.n_items() - 1);
-            //         selection_model.set_selected(next_index);
-            //         for (video_player_index, child) in flowbox_children(&video_player_container).enumerate() {
-            //             let fb_child = match child.downcast_ref::<FlowBoxChild>() {
-            //                 Some(c) => c,
-            //                 None => continue,
-            //             };
-
-            //             let content = match fb_child.child() {
-            //                 Some(c) => c,
-            //                 None => continue,
-            //             };
-
-            //             let video_player = match content.downcast_ref::<VideoPlayer>() {
-            //                 Some(vp) => vp,
-            //                 None => continue,
-            //             };
-
-            //             let arc = match video_player.pipeline().upgrade() {
-            //                 Some(a) => a,
-            //                 None => {
-            //                     eprintln!("Shared jump to segment: Pipeline dropped");
-            //                     continue
-            //                 }
-            //             };
-
-            //             let mut pipeline = match arc.lock() {
-            //                 Ok(g) => g,
-            //                 Err(_) => {
-            //                     eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
-            //                     continue
-            //                 }
-            //             };
-                        
-            //             if let Some(selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
-            //                 let time = selection.get_time(video_player_index).and_then(|nanos| Some(ClockTime::from_nseconds(nanos))).unwrap();
-            //                 if let Ok(result) = pipeline.seek_position(time) {
-            //                     println!("Shared pipeline seek for video player {video_player_index} to position {time}");
-            //                 }
-            //             }
-            //         }
-            //     }
-            // ));
             self.jump_to_segment_button.connect_clicked(glib::clone!(
+                #[strong(rename_to = split_table_column_view_weak)] self.split_table_column_view,
+                #[strong(rename_to = starting_segment)] self.starting_segment,
                 #[strong(rename_to = video_player_container_weak)] self.video_player_container,
-                #[strong(rename_to = split_table_weak)] self.split_table_column_view,
+                #[strong(rename_to = split_table_weak)] self.split_table,
+                #[strong(rename_to = split_table_liststore_weak)] self.split_table_liststore,
                 move |_| {
+                    let split_table_column_view_borrow = split_table_column_view_weak.borrow();
+                    let split_table_column_view_ref = match split_table_column_view_borrow.as_ref() {
+                        Some(st) => st,
+                        None => return,
+                    };
+                    let split_table_column_view = match split_table_column_view_ref.upgrade() {
+                        Some(st) => st,
+                        None => return,
+                    };
                     let video_player_container_borrow = video_player_container_weak.borrow();
                     let video_player_container_ref = match video_player_container_borrow.as_ref() {
                         Some(vpc) => vpc,
@@ -402,8 +309,17 @@ mod imp {
                         Some(vpc) => vpc,
                         None => return,
                     };
-                    let split_table_borrow= split_table_weak.borrow();
-                    let split_table_ref = match split_table_borrow.as_ref() {
+                    let split_table_liststore_borrow = split_table_liststore_weak.borrow();
+                    let split_table_liststore_ref = match split_table_liststore_borrow.as_ref() {
+                        Some(st) => st,
+                        None => return,
+                    };
+                    let split_table_liststore = match split_table_liststore_ref.upgrade() {
+                        Some(st) => st,
+                        None => return,
+                    };
+                    let split_table_weak_borrow = split_table_weak.borrow();
+                    let split_table_ref = match split_table_weak_borrow.as_ref() {
                         Some(st) => st,
                         None => return,
                     };
@@ -411,6 +327,17 @@ mod imp {
                         Some(st) => st,
                         None => return,
                     };
+
+                    match split_table_column_view.model().and_downcast::<SingleSelection>() {
+                        Some(selection_model) => {
+                            let selected_index = selection_model.selected();
+                            starting_segment.set(selected_index);
+                        },
+                        None => {
+                            starting_segment.set(0u32);
+                        }
+                    }
+
                     for child in flowbox_children(&video_player_container) {
                         let fb_child = match child.downcast_ref::<FlowBoxChild>() {
                             Some(c) => c,
@@ -427,6 +354,18 @@ mod imp {
                             None => continue,
                         };
 
+                        
+                        let video_player_id = video_player.get_id();
+                        let start_time_offset = split_table.get_offset_time_entry(video_player_id.as_str()).get_time();
+                        let start_time_for_syncing = if starting_segment.get() == 0 { start_time_offset } else { 
+                            split_table_liststore.item(starting_segment
+                                .get()
+                                .saturating_sub(1))
+                                .and_downcast::<VideoSegment>()
+                                .unwrap()
+                                .get_time(video_player_id.as_str()
+                        )};
+
                         let arc = match video_player.pipeline().upgrade() {
                             Some(a) => a,
                             None => {
@@ -442,14 +381,11 @@ mod imp {
                                 continue
                             }
                         };
-                        let video_player_id = video_player.get_id();
-                        let selection_model = split_table.model().and_downcast::<SingleSelection>().unwrap();
-                        if let Some(selection) = selection_model.selected_item().and_downcast::<VideoSegment>() {
-                            let time = selection.get_time(video_player_id.to_string().as_str());
-                            let clock_time = ClockTime::from_nseconds(time);
-                            if let Ok(_result) = pipeline.seek_position(clock_time) {
-                                println!("Shared pipeline seek for video player {video_player_id} to position {clock_time}");
-                            }
+
+                        println!("JUMP TO SEGMENT {video_player_id}: start_time_offset: {start_time_offset}");
+                        println!("JUMP TO SEGMENT {video_player_id}: start_time_for_syncing (starting_segment_time): {start_time_for_syncing}");
+                        if let Err(e) = pipeline.seek_position(ClockTime::from_nseconds(start_time_for_syncing)) {
+                            eprintln!("Player {video_player_id} error setting position: {e}");
                         }
                     }
                 }
@@ -843,10 +779,8 @@ impl SharedSeekBar {
         imp.seek_bar.set_sensitive(status);
         imp.jump_to_segment_button.set_sensitive(status);
         imp.next_frame_button.set_sensitive(status);
-        imp.next_segment_button.set_sensitive(status);
         imp.play_button.set_sensitive(status);
         imp.previous_frame_button.set_sensitive(status);
-        imp.previous_segment_button.set_sensitive(status);
     }
 
     pub fn remove_marks(&self, video_player_id: &str) {

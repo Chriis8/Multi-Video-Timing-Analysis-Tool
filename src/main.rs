@@ -19,6 +19,7 @@ use crate::widgets::seek_bar::color_picker::ColorPool;
 use crate::widgets::split_panel::timeentry::TimeEntry;
 use crate::widgets::sync::sync_manager::SyncManager;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 const MAX_VIDEO_PLAYERS: u32 = 6;
 
@@ -115,8 +116,9 @@ fn build_ui(app: &Application) -> Builder {
     let video_container_clone = video_container.clone();
     let shared_seek_bar_clone = ssb.clone();
 
-    let color_picker = RefCell::new(ColorPool::new(["red", "blue", "green", "black", "coral", "lavender"].into_iter().map(String::from).collect()));
+    let color_picker = Rc::new(RefCell::new(ColorPool::new(["red", "blue", "green", "black", "coral", "lavender"].into_iter().map(String::from).collect())));
     
+    let color_picker_clone = color_picker.clone();
     // Adds new video player and new columns to split table
     let split_table_clone = split_table.clone();
     new_video_player_button.connect_clicked(move |_| {
@@ -131,7 +133,7 @@ fn build_ui(app: &Application) -> Builder {
         // Sets up new video player
         let video_player_id = get_next_id().to_string();
         let new_player = VideoPlayer::new(video_player_id.as_str());
-        let mut picker = color_picker.borrow_mut();
+        let mut picker = color_picker_clone.borrow_mut();
         let color = picker.assign_color(video_player_id.as_str()).unwrap();
         new_player.set_color(color.as_str());
         new_player.setup_event_handlers(window);
@@ -192,6 +194,7 @@ fn build_ui(app: &Application) -> Builder {
             #[strong(rename_to = video_player_container)] video_container_clone,
             #[strong(rename_to = shared_seek_bar)] shared_seek_bar_clone,
             #[strong(rename_to = split_table)] split_table_clone,
+            #[strong(rename_to = color_picker)] color_picker_clone,
             move |_| {
                 println!("removing video player");
                 split_table.remove_column(pipeline_id.as_str());
@@ -202,12 +205,12 @@ fn build_ui(app: &Application) -> Builder {
                 let number_of_columns = ((count as u32).saturating_sub(1)).clamp(1,3);
                 video_player_container.set_max_children_per_line(number_of_columns);
                 video_player_container.set_min_children_per_line(number_of_columns);
+                let mut picker = color_picker.borrow_mut();
+                picker.release_color(pipeline_id.as_str());
                 if let Some(flowbox_child) = video_player.parent().and_then(|x| x.dynamic_cast::<FlowBoxChild>().ok()) {
                     video_player_container.remove(&flowbox_child);
                 }
-                unsafe{
-                    video_player.run_dispose();
-                }
+                video_player.cleanup();
                 None
             }
         ));
@@ -243,10 +246,9 @@ fn build_ui(app: &Application) -> Builder {
         // Updates video_container data keeping track of the active video players
         store_data(&video_container_clone, "count", count + 1);
 
-        split_table_clone.connect_column_to_seekbar(&video_container_clone, video_player_index);
-        let colors = vec!["red", "blue", "green", "black", "coral", "lavender"];
-        shared_seek_bar_clone.connect_column(video_player_id.as_str(), colors[video_player_index as usize]);
         
+        split_table_clone.connect_column_to_seekbar(&video_container_clone, video_player_index);
+        shared_seek_bar_clone.connect_column(video_player_id.as_str(), color.as_str());
     });
 
     let video_container_clone = video_container.clone();

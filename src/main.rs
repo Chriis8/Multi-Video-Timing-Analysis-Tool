@@ -396,9 +396,7 @@ fn main() -> glib::ExitCode {
                         None => continue,
                     };
                     video_player.unparent();
-                    unsafe {
-                        video_player.run_dispose();
-                    }
+                    video_player.cleanup();
                 }
                 let window: ApplicationWindow = builder.object("main_window").expect("Failed to get main_window from UI file");
                 let sync_manager = unsafe { get_data::<SyncManager>(&window, "sync_manager").unwrap().as_ref() };

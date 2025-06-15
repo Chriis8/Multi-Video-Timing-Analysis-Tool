@@ -22,6 +22,7 @@ use std::time::Duration;
 use glib::timeout_add_local;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use crate::helpers::data::borrow_asref_upgrade;
 
 
 mod imp {
@@ -54,6 +55,8 @@ mod imp {
         pub scale_start_instant: Arc<Mutex<Option<Instant>>>,
         pub scale_start_offset: Rc<Cell<f64>>,
         pub starting_segment: Rc<Cell<u32>>,
+        pub debounce_duration: RefCell<Duration>,
+        pub last_click: Rc<RefCell<Option<Instant>>>,
     }
 
     #[gtk::glib::object_subclass]
@@ -78,15 +81,7 @@ mod imp {
                 #[strong(rename_to = video_player_container_weak)] self.video_player_container,
                 #[strong(rename_to = seek_bar)] self.seek_bar,
                 move |_| {
-                    let video_player_container_borrow = video_player_container_weak.borrow();
-                    let video_player_container_ref = match video_player_container_borrow.as_ref() {
-                        Some(vpc) => vpc,
-                        None => return,
-                    };
-                    let video_player_container = match video_player_container_ref.upgrade() {
-                        Some(vpc) => vpc,
-                        None => return,
-                    };
+                    let video_player_container = borrow_asref_upgrade(&video_player_container_weak).ok().unwrap();
 
                     for child in flowbox_children(&video_player_container) {
                         let fb_child = match child.downcast_ref::<FlowBoxChild>() {
@@ -131,102 +126,46 @@ mod imp {
                 }
             ));
             self.play_button.connect_clicked(glib::clone!(
-                #[strong(rename_to = video_player_container_weak)] self.video_player_container,
-                #[strong(rename_to = split_table_liststore_weak)] self.split_table_liststore,
                 #[strong(rename_to = scale_start_instant)] self.scale_start_instant,
                 #[strong(rename_to = seek_bar)] self.seek_bar,
                 #[strong(rename_to = scale_start_offset)] self.scale_start_offset,
                 #[strong(rename_to = is_paused)] self.is_paused,
                 #[strong(rename_to = sync_manager_weak)] self.sync_manager,
-                #[strong(rename_to = start_time_offset_liststore_weak)] self.start_time_offset_liststore,
-                #[strong(rename_to = split_table_weak)] self.split_table,
-                #[strong(rename_to = starting_segment)] self.starting_segment,
+                #[strong(rename_to = last_click)] self.last_click,
+                #[strong(rename_to = debounce_duration)] self.debounce_duration,
                 move |_| {
-                    let video_player_container_borrow = video_player_container_weak.borrow();
-                    let video_player_container_ref = match video_player_container_borrow.as_ref() {
-                        Some(vpc) => vpc,
-                        None => return,
-                    };
-                    let video_player_container = match video_player_container_ref.upgrade() {
-                        Some(vpc) => vpc,
-                        None => return,
-                    };
-                    let split_table_liststore_borrow = split_table_liststore_weak.borrow();
-                    let split_table_liststore_ref = match split_table_liststore_borrow.as_ref() {
-                        Some(st) => st,
-                        None => return,
-                    };
-                    let split_table_liststore = match split_table_liststore_ref.upgrade() {
-                        Some(st) => st,
-                        None => return,
-                    };
-                    let sync_manager_weak_borrow = sync_manager_weak.borrow();
-                    let sync_manager_ref = match sync_manager_weak_borrow.as_ref() {
-                        Some(st) => st,
-                        None => return,
-                    };
-                    let sync_manager = match sync_manager_ref.upgrade() {
-                        Some(st) => st,
-                        None => return,
-                    };
-                    let split_table_weak_borrow = split_table_weak.borrow();
-                    let split_table_ref = match split_table_weak_borrow.as_ref() {
-                        Some(st) => st,
-                        None => return,
-                    };
-                    let split_table = match split_table_ref.upgrade() {
-                        Some(st) => st,
-                        None => return,
-                    };
+                    let sync_manager = borrow_asref_upgrade(&sync_manager_weak).ok().unwrap();
 
+                    let now = Instant::now();
+                    let mut last_click = last_click.borrow_mut();
 
-                    let mut pipeline_clamp_times: HashMap<String, (ClockTime, ClockTime)> = HashMap::new();
-                    for child in flowbox_children(&video_player_container) {
-                        let fb_child = match child.downcast_ref::<FlowBoxChild>() {
-                            Some(c) => c,
-                            None => continue,
-                        };
-
-                        let content = match fb_child.child() {
-                            Some(c) => c,
-                            None => continue,
-                        };
-
-                        let video_player = match content.downcast_ref::<VideoPlayer>() {
-                            Some(vp) => vp,
-                            None => continue,
-                        };
-                        let video_player_id = video_player.get_id();
-                        let start_time_offset = split_table.get_offset_time_entry(video_player_id.as_str()).get_time();
-                        let start_time_for_syncing = if starting_segment.get() == 0 { start_time_offset } else { 
-                            split_table_liststore.item(starting_segment
-                                .get()
-                                .saturating_sub(1))
-                                .and_downcast::<VideoSegment>()
-                                .unwrap()
-                                .get_time(video_player_id.as_str()
-                            )};
-                        let last_mark_position = split_table_liststore.item(split_table_liststore.n_items() - 1)
-                            .and_downcast::<VideoSegment>()
-                            .unwrap()
-                            .get_time(video_player_id.to_string().as_str());
-                        pipeline_clamp_times.insert(video_player_id, (ClockTime::from_nseconds(start_time_for_syncing), ClockTime::from_nseconds(last_mark_position)));
+                    if let Some(last_time) = *last_click {
+                        if now.duration_since(last_time) < *debounce_duration.borrow() {
+                            println!("debouncing shared seek bar play button");
+                            return;
+                        }
                     }
 
-                    sync_manager.clear_state();
-
-                    sync_manager.set_on_all_playing(glib::clone!(
-                        #[weak(rename_to = start_instant)] scale_start_instant,
-                        move || {
-                            let now = Instant::now();
-                            println!("callbacked now: {now:?}");
-                            *start_instant.lock().unwrap() = Some(now);
-                        }
-                    ));
-
-                    sync_manager.play_videos(pipeline_clamp_times);
-
-                    scale_start_offset.set(seek_bar.get_scale().value());
+                    *last_click = Some(now);
+                    drop(last_click);
+                    
+                    let state = is_paused.get();
+                    
+                    if state == true {
+                        sync_manager.clear_state();
+                        sync_manager.set_on_all_playing(glib::clone!(
+                            #[weak(rename_to = start_instant)] scale_start_instant,
+                            move || {
+                                let now = Instant::now();
+                                println!("callbacked now: {now:?}");
+                                *start_instant.lock().unwrap() = Some(now);
+                            }
+                        ));
+                        sync_manager.play_videos();
+                        scale_start_offset.set(seek_bar.get_scale().value());
+                    } else {
+                        sync_manager.pause_videos();
+                    }
                     is_paused.set(!is_paused.get());
                 }
             ));
@@ -234,15 +173,8 @@ mod imp {
                 #[strong(rename_to = video_player_container_weak)] self.video_player_container,
                 #[strong(rename_to = seek_bar)] self.seek_bar,
                 move |_| {
-                    let video_player_container_borrow = video_player_container_weak.borrow();
-                    let video_player_container_ref = match video_player_container_borrow.as_ref() {
-                        Some(vpc) => vpc,
-                        None => return,
-                    };
-                    let video_player_container = match video_player_container_ref.upgrade() {
-                        Some(vpc) => vpc,
-                        None => return,
-                    };
+                    let video_player_container = borrow_asref_upgrade(&video_player_container_weak).ok().unwrap();
+                    
                     for child in flowbox_children(&video_player_container) {
                         let fb_child = match child.downcast_ref::<FlowBoxChild>() {
                             Some(c) => c,
@@ -291,43 +223,11 @@ mod imp {
                 #[strong(rename_to = split_table_weak)] self.split_table,
                 #[strong(rename_to = split_table_liststore_weak)] self.split_table_liststore,
                 move |_| {
-                    let split_table_column_view_borrow = split_table_column_view_weak.borrow();
-                    let split_table_column_view_ref = match split_table_column_view_borrow.as_ref() {
-                        Some(st) => st,
-                        None => return,
-                    };
-                    let split_table_column_view = match split_table_column_view_ref.upgrade() {
-                        Some(st) => st,
-                        None => return,
-                    };
-                    let video_player_container_borrow = video_player_container_weak.borrow();
-                    let video_player_container_ref = match video_player_container_borrow.as_ref() {
-                        Some(vpc) => vpc,
-                        None => return,
-                    };
-                    let video_player_container = match video_player_container_ref.upgrade() {
-                        Some(vpc) => vpc,
-                        None => return,
-                    };
-                    let split_table_liststore_borrow = split_table_liststore_weak.borrow();
-                    let split_table_liststore_ref = match split_table_liststore_borrow.as_ref() {
-                        Some(st) => st,
-                        None => return,
-                    };
-                    let split_table_liststore = match split_table_liststore_ref.upgrade() {
-                        Some(st) => st,
-                        None => return,
-                    };
-                    let split_table_weak_borrow = split_table_weak.borrow();
-                    let split_table_ref = match split_table_weak_borrow.as_ref() {
-                        Some(st) => st,
-                        None => return,
-                    };
-                    let split_table = match split_table_ref.upgrade() {
-                        Some(st) => st,
-                        None => return,
-                    };
-
+                    let split_table_column_view = borrow_asref_upgrade(&split_table_column_view_weak).ok().unwrap();
+                    let video_player_container = borrow_asref_upgrade(&video_player_container_weak).ok().unwrap();
+                    let split_table_liststore = borrow_asref_upgrade(&split_table_liststore_weak).ok().unwrap();
+                    let split_table = borrow_asref_upgrade(&split_table_weak).ok().unwrap();
+                    
                     match split_table_column_view.model().and_downcast::<SingleSelection>() {
                         Some(selection_model) => {
                             let selected_index = selection_model.selected();
@@ -436,15 +336,8 @@ mod imp {
                 #[weak(rename_to = is_paused)] self.is_paused,
                 #[strong(rename_to = video_player_container_weak)] self.video_player_container,
                 move |_,_,_x,_y| {
-                    let video_player_container_borrow = video_player_container_weak.borrow();
-                    let video_player_container_ref = match video_player_container_borrow.as_ref() {
-                        Some(vpc) => vpc,
-                        None => return,
-                    };
-                    let video_player_container = match video_player_container_ref.upgrade() {
-                        Some(vpc) => vpc,
-                        None => return,
-                    };
+                    let video_player_container = borrow_asref_upgrade(&video_player_container_weak).ok().unwrap();
+                    
                     for child in flowbox_children(&video_player_container) {
                         let fb_child = match child.downcast_ref::<FlowBoxChild>() {
                             Some(c) => c,
@@ -490,24 +383,9 @@ mod imp {
                 #[strong(rename_to = video_player_container_weak)] self.video_player_container,
                 #[strong(rename_to = start_time_offset_liststore_weak)] self.start_time_offset_liststore,
                 move |_,_,_x,_y| {
-                    let video_player_container_borrow = video_player_container_weak.borrow();
-                    let video_player_container_ref = match video_player_container_borrow.as_ref() {
-                        Some(vpc) => vpc,
-                        None => return,
-                    };
-                    let video_player_container = match video_player_container_ref.upgrade() {
-                        Some(vpc) => vpc,
-                        None => return,
-                    };
-                    let start_time_offset_liststore_borrow = start_time_offset_liststore_weak.borrow();
-                    let start_time_offset_liststore_ref = match start_time_offset_liststore_borrow.as_ref() {
-                        Some(st) => st,
-                        None => return,
-                    };
-                    let start_time_offset_liststore = match start_time_offset_liststore_ref.upgrade() {
-                        Some(st) => st,
-                        None => return,
-                    };
+                    let video_player_container = borrow_asref_upgrade(&video_player_container_weak).ok().unwrap();
+                    let start_time_offset_liststore = borrow_asref_upgrade(&start_time_offset_liststore_weak).ok().unwrap();
+                    
                     for (video_player_index, child) in flowbox_children(&video_player_container).enumerate() {
                         let fb_child = match child.downcast_ref::<FlowBoxChild>() {
                             Some(c) => c,
@@ -588,6 +466,7 @@ impl SharedSeekBar {
         imp.sync_manager.borrow_mut().replace(Downgrade::downgrade(sync_manager));
         imp.split_table.borrow_mut().replace(Downgrade::downgrade(split_table));
         *imp.scale_start_instant.lock().unwrap() = None;
+        *imp.debounce_duration.borrow_mut() = Duration::from_millis(200);
         imp.setup_buttons();
         imp.setup_seek_bar_control();
         widget.set_controls(false);
@@ -596,34 +475,10 @@ impl SharedSeekBar {
 
     pub fn connect_row(&self, row_index: u32) {
         let imp = self.imp();
-        let split_table_borrow = imp.split_table.borrow();
-        let split_table_ref = match split_table_borrow.as_ref() {
-            Some(st) => st,
-            None => return,
-        };
-        let split_table= match split_table_ref.upgrade() {
-            Some(st) => st,
-            None => return,
-        };
-        let split_table_liststore_borrow = imp.split_table_liststore.borrow();
-        let split_table_liststore_ref = match split_table_liststore_borrow.as_ref() {
-            Some(stl) => stl,
-            None => return,
-        };
-        let split_table_liststore = match split_table_liststore_ref.upgrade() {
-            Some(stl) => stl,
-            None => return,
-        };
-        let video_player_container_borrow = imp.video_player_container.borrow();
-        let video_player_container_ref = match video_player_container_borrow.as_ref() {
-            Some(stl) => stl,
-            None => return,
-        };
-        let video_player_container = match video_player_container_ref.upgrade() {
-            Some(stl) => stl,
-            None => return,
-        };
-        
+        let split_table = borrow_asref_upgrade(&imp.split_table).ok().unwrap();
+        let split_table_liststore = borrow_asref_upgrade(&imp.split_table_liststore).ok().unwrap();
+        let video_player_container = borrow_asref_upgrade(&imp.video_player_container).ok().unwrap();
+                
         let row = split_table_liststore.item(row_index).and_downcast::<VideoSegment>().unwrap();
         let row_count = split_table_liststore.n_items();
         //let colors = vec!["red", "blue", "green", "black", "coral", "lavender"];
@@ -657,26 +512,9 @@ impl SharedSeekBar {
 
     pub fn connect_column(&self, video_player_id: &str, color: &str) {
         let imp = self.imp();
-        let split_table_liststore_borrow = imp.split_table_liststore.borrow();
-        let split_table_liststore_ref = match split_table_liststore_borrow.as_ref() {
-            Some(stl) => stl,
-            None => return,
-        };
-        let split_table_liststore = match split_table_liststore_ref.upgrade() {
-            Some(stl) => stl,
-            None => return,
-        };
-        let split_table_borrow = imp.split_table.borrow();
-        let split_table_ref = match split_table_borrow.as_ref() {
-            Some(st) => st,
-            None => return,
-        };
-        let split_table = match split_table_ref.upgrade() {
-            Some(st) => st,
-            None => return,
-        };
-
-
+        let split_table_liststore = borrow_asref_upgrade(&imp.split_table_liststore).ok().unwrap();
+        let split_table = borrow_asref_upgrade(&imp.split_table).ok().unwrap();
+        
         let row_count = split_table_liststore.n_items();
         for i in 0..row_count {
             let row = split_table_liststore.item(i).and_downcast::<VideoSegment>().unwrap();
@@ -695,26 +533,10 @@ impl SharedSeekBar {
 
     pub fn toggle_has_control(&self) {
         let imp = self.imp();
-        let video_player_container_borrow = imp.video_player_container.borrow();
-        let video_player_container_ref = match video_player_container_borrow.as_ref() {
-            Some(vpc) => vpc,
-            None => return,
-        };
-        let video_player_container = match video_player_container_ref.upgrade() {
-            Some(vpc) => vpc,
-            None => return,
-        };
-        let split_table_borrow = imp.split_table.borrow();
-        let split_table_ref = match split_table_borrow.as_ref() {
-            Some(st) => st,
-            None => return,
-        };
-        let split_table = match split_table_ref.upgrade() {
-            Some(st) => st,
-            None => return,
-        };
-
-
+        let video_player_container = borrow_asref_upgrade(&imp.video_player_container).ok().unwrap();
+        let split_table = borrow_asref_upgrade(&imp.split_table).ok().unwrap();
+        let split_table_liststore = borrow_asref_upgrade(&imp.split_table_liststore).ok().unwrap();
+        
         let status = imp.has_control.get();
         for child in flowbox_children(&video_player_container) {
             let fb_child = match child.downcast_ref::<FlowBoxChild>() {
@@ -752,10 +574,15 @@ impl SharedSeekBar {
             if !status {
                 let offset = split_table.get_offset_time_entry(video_player_id.as_str());
                 let start_time = gstreamer::ClockTime::from_nseconds(offset.get_time());
+                let end_time = split_table.get_previous_time(video_player_id.as_str(), split_table_liststore.n_items() - 1).unwrap_or(pipeline.get_length().unwrap());
+                pipeline.set_start_clamp(start_time.nseconds());
+                pipeline.set_end_clamp(end_time);
                 if let Err(e) = pipeline.seek_position(start_time) {
                     eprintln!("Player {video_player_id} error setting position: {e}");
                 }
                 imp.seek_bar.get_scale().set_value(0.0);
+            } else {
+                pipeline.reset_clamps();
             }
             video_player.set_controls(status);
         }
@@ -785,15 +612,7 @@ impl SharedSeekBar {
 
     pub fn remove_marks(&self, video_player_id: &str) {
         let imp = self.imp();
-        let split_table_liststore_borrow = imp.split_table_liststore.borrow();
-        let split_table_liststore_ref = match split_table_liststore_borrow.as_ref() {
-            Some(st) => st,
-            None => return,
-        };
-        let split_table_liststore = match split_table_liststore_ref.upgrade() {
-            Some(st) => st,
-            None => return,
-        };
+        let split_table_liststore = borrow_asref_upgrade(&imp.split_table_liststore).ok().unwrap();
 
         for i in 0..split_table_liststore.n_items() {
             let segment = split_table_liststore.item(i).and_downcast::<VideoSegment>().unwrap();
@@ -803,5 +622,73 @@ impl SharedSeekBar {
 
         self.update_timeline_length();
     }
+
+    // let video_player_container = borrow_asref_upgrade(&video_player_container_weak).ok().unwrap();
+    //                 let split_table_liststore = borrow_asref_upgrade(&split_table_liststore_weak).ok().unwrap();
+    //                 let sync_manager = borrow_asref_upgrade(&sync_manager_weak).ok().unwrap();
+    //                 let split_table = borrow_asref_upgrade(&split_table_weak).ok().unwrap();
+
+    //                 let now = Instant::now();
+    //                 let mut last_click = last_click.borrow_mut();
+
+    //                 if let Some(last_time) = *last_click {
+    //                     if now.duration_since(last_time) < *debounce_duration.borrow() {
+    //                         return;
+    //                     }
+    //                 }
+
+    //                 *last_click = Some(now);
+    //                 drop(last_click);
+                    
+    //                 let mut pipeline_clamp_times: HashMap<String, (ClockTime, ClockTime)> = HashMap::new();
+                    
+    //                 let mut state = is_paused.get();
+    //                 for child in flowbox_children(&video_player_container) {
+    //                     let fb_child = match child.downcast_ref::<FlowBoxChild>() {
+    //                         Some(c) => c,
+    //                         None => continue,
+    //                     };
+
+    //                     let content = match fb_child.child() {
+    //                         Some(c) => c,
+    //                         None => continue,
+    //                     };
+
+    //                     let video_player = match content.downcast_ref::<VideoPlayer>() {
+    //                         Some(vp) => vp,
+    //                         None => continue,
+    //                     };
+    //                     let video_player_id = video_player.get_id();
+    //                     if state == false {
+    //                         let start_time_offset = split_table.get_offset_time_entry(video_player_id.as_str()).get_time();
+    //                         let start_time_for_syncing = if starting_segment.get() == 0 { start_time_offset } else { 
+    //                             split_table_liststore.item(starting_segment
+    //                                 .get()
+    //                                 .saturating_sub(1))
+    //                                 .and_downcast::<VideoSegment>()
+    //                                 .unwrap()
+    //                                 .get_time(video_player_id.as_str()
+    //                             )};
+    //                         let last_mark_position = split_table.get_previous_time(video_player_id.as_str(), split_table_liststore.n_items() - 1).unwrap();
+    //                         pipeline_clamp_times.insert(video_player_id, (ClockTime::from_nseconds(start_time_for_syncing), ClockTime::from_nseconds(last_mark_position)));
+                            
+    //                         sync_manager.clear_state();
+        
+    //                         sync_manager.set_on_all_playing(glib::clone!(
+    //                             #[weak(rename_to = start_instant)] scale_start_instant,
+    //                             move || {
+    //                                 let now = Instant::now();
+    //                                 println!("callbacked now: {now:?}");
+    //                                 *start_instant.lock().unwrap() = Some(now);
+    //                             }
+    //                         ));
+    //                         sync_manager.play_videos(pipeline_clamp_times);
+    //                         scale_start_offset.set(seek_bar.get_scale().value());
+    //                     } else  {
+
+    //                     }
+    //                 }
+    //                 is_paused.set(!is_paused.get());
+    //             }
 }
 

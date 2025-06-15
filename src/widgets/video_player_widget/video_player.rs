@@ -14,10 +14,12 @@ use std::cell::{Cell, RefCell};
 use once_cell::sync::Lazy;
 use crate::widgets::seek_bar::seek_bar::SeekBar;
 use glib::{WeakRef, clone::Downgrade, clone::Upgrade};
+use std::time::Instant;
 
 mod imp {
     use gtk::{Box, Button, Label, Picture};
     use glib::subclass::Signal;
+
 
 
     use super::*;
@@ -34,6 +36,12 @@ mod imp {
         pub id: RefCell<String>,
 
         pub color: RefCell<String>,
+
+        pub debouce_duration: RefCell<Duration>,
+
+        pub last_click: Rc<RefCell<Option<Instant>>>,
+
+        pub state: Rc<RefCell<Option<gstreamer::State>>>,
         
         #[template_child]
         pub vbox: TemplateChild<Box>,
@@ -200,6 +208,9 @@ impl VideoPlayer {
         imp.seek_bar.update_marks_on_width_change_timeout();
         *imp.id.borrow_mut() = id.to_string();
         *imp.color.borrow_mut() = "black".to_string();
+        *imp.state.borrow_mut() = Some(gstreamer::State::Paused);
+        *imp.debouce_duration.borrow_mut() = Duration::from_millis(200);
+        *imp.last_click.borrow_mut() = None;
 
         println!("created video player widget");
         widget
@@ -352,6 +363,7 @@ impl VideoPlayer {
                                         let timeline_length = pipeline.get_length().unwrap();
                                         seekbar.set_timeline_length(timeline_length);
                                         let nanos: &dyn ToValue = &timeline_length;
+                                        pipeline.reset_clamps();
                                         this.emit_by_name::<()>("timeline-length-acquired", &[nanos]);
                                         this.set_controls(true);
                                         this.set_scale_interation(true);
@@ -397,13 +409,42 @@ impl VideoPlayer {
         // Set video to playing state
         imp.play_button.connect_clicked(glib::clone!(
             #[strong] gstman_weak,
+            #[weak(rename_to = last_click)] imp.last_click,
+            #[strong(rename_to = debounce_duration)] imp.debouce_duration,
+            #[weak(rename_to = state)] imp.state,
             move |_| {
-                if let Some(gstman) = gstman_weak.upgrade() {
-                    if let Ok(pipeline) = gstman.lock() {
-                        pipeline.play_video();
-                    } else {
-                        eprintln!("Failed to aquire lock on Video pipeline");
+                let now = Instant::now();
+                let mut last_click = last_click.borrow_mut();
+
+                if let Some(last_time) = *last_click {
+                    if now.duration_since(last_time) < *debounce_duration.borrow() {
+                        println!("Debouncing video player play button");
+                        return;
                     }
+                }
+
+                *last_click = Some(now);
+                drop(last_click);
+
+                let mut state = state.borrow_mut();
+                if state.unwrap() == gstreamer::State::Playing {
+                    if let Some(gstman) = gstman_weak.upgrade() {
+                        if let Ok(pipeline) = gstman.lock() {
+                            pipeline.pause_video();
+                        } else {
+                            eprintln!("Failed to aquire lock on Video pipeline");
+                        }
+                    }
+                    *state = Some(gstreamer::State::Paused);
+                } else if state.unwrap() == gstreamer::State::Paused {
+                    if let Some(gstman) = gstman_weak.upgrade() {
+                        if let Ok(pipeline) = gstman.lock() {
+                            pipeline.play_video();
+                        } else {
+                            eprintln!("Failed to aquire lock on Video pipeline");
+                        }
+                    }
+                    *state = Some(gstreamer::State::Playing);
                 }
             }
         ));
@@ -554,5 +595,6 @@ impl VideoPlayer {
     pub fn cleanup(&self) {
         let imp = self.imp();
         imp.cleanup();
+        println!("pipeline cleanup function");
     }
 }

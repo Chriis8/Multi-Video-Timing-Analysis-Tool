@@ -36,10 +36,6 @@ mod imp {
     }
 
     impl VideoSegment {
-        fn notify_time_relative(&self, index: &str) {
-            let prop_name = format!("relative-time-{}", index);
-            self.obj().notify(&prop_name);
-        }
     }
 
     impl ObjectImpl for VideoSegment {
@@ -54,53 +50,6 @@ mod imp {
                             .flags(glib::ParamFlags::READWRITE)
                             .build()
                     ]
-                    // let mut props = vec![
-                    //     glib::ParamSpecString::builder("name")
-                    //         .nick("Name")
-                    //         .blurb("Name of the segment")
-                    //         .default_value(None)
-                    //         .flags(glib::ParamFlags::READWRITE)
-                    //         .build()
-                    // ];
-                    // for i in 0..6 {
-                    //     props.push(glib::ParamSpecUInt64::builder(&format!("time-{}", i))
-                    //         .nick(&format!("Time {}", i))
-                    //         .blurb("Segment Time")
-                    //         .minimum(0)
-                    //         .maximum(u64::MAX)
-                    //         .default_value(0)
-                    //         .flags(glib::ParamFlags::READWRITE)
-                    //         .build()
-                    //     );
-                    //     props.push(glib::ParamSpecUInt64::builder(&format!("duration-{}", i))
-                    //         .nick(&format!("Duration {}", i))
-                    //         .blurb("Duration Time")
-                    //         .minimum(0)
-                    //         .maximum(u64::MAX)
-                    //         .default_value(0)
-                    //         .flags(glib::ParamFlags::READWRITE)
-                    //         .build()
-                    //     );
-                    //     props.push(glib::ParamSpecUInt64::builder(&format!("offset-{}", i))
-                    //         .nick(&format!("Offset {}", i))
-                    //         .blurb("Offset Time")
-                    //         .minimum(0)
-                    //         .maximum(u64::MAX)
-                    //         .default_value(0)
-                    //         .flags(glib::ParamFlags::READWRITE)
-                    //         .build()
-                    //     );
-                    //     props.push(glib::ParamSpecUInt64::builder(&format!("relative-time-{}", i))
-                    //         .nick(&format!("Time Relative {}", i))
-                    //         .blurb("Time - Offset")
-                    //         .minimum(0)
-                    //         .maximum(u64::MAX)
-                    //         .default_value(0)
-                    //         .flags(glib::ParamFlags::READWRITE)
-                    //         .build()
-                    //     );
-                    // }
-                    // props
                 });
                 PROPERTIES.as_ref()
         }
@@ -108,34 +57,6 @@ mod imp {
         fn property(&self, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
             match pspec.name() {
                 "name" => self.name.borrow().to_value(),
-                // n if n.starts_with("time-") => {
-                //     let id = &n["time-".len()..];
-                //     let segments_ref = self.segments.borrow();
-                //     let time_entry = &segments_ref.get(id).unwrap().time;
-                //     time_entry.get_time().to_value()
-                // }
-                // n if n.starts_with("duration-") => {
-                //     let id = &n["duration-".len()..];
-                //     let val = self.segments.borrow().get(id).and_then(|v| v.duration).unwrap_or(u64::MAX);
-                //     val.to_value()
-                // }
-                // n if n.starts_with("offset-") => {
-                //     let id = &n["offset-".len()..];
-                //     let segments_ref = self.segments.borrow();
-                //     let offset = &segments_ref.get(id).unwrap().offset;
-                //     offset.get_time().to_value()
-                // }
-                // n if n.starts_with("relative-time-") => {
-                //     let id = &n["relative-time-".len()..];
-                //     let segments_ref = self.segments.borrow();
-                //     let offset = segments_ref.get(id).unwrap().offset.get_time();
-                //     let time = segments_ref.get(id).unwrap().time.get_time();
-                //     if time == u64::MAX {
-                //         return time.to_value();
-                //     } else {
-                //         return time.saturating_sub(offset).to_value();
-                //     }
-                // }
                 _ => unimplemented!()
             }
         }
@@ -148,39 +69,6 @@ mod imp {
                     *self.name.borrow_mut() = val;
                     self.notify(pspec);
                 }
-                // n if n.starts_with("time-") => {
-                //     let id = &n["time-".len()..];
-                //     let segments = &mut self.segments.borrow_mut();
-                //     if segments.contains_key(id) {
-                //         let raw = value.get::<u64>().unwrap_or_default();
-                //         segments.get(id).unwrap().time.set_time(raw);
-                //         self.notify(pspec);
-                //         self.notify_time_relative(id);
-                //     }
-                // }
-                // n if n.starts_with("duration-") => {
-                //     let id = &n["duration-".len()..];
-                //     let segments = &mut self.segments.borrow_mut();
-                //     if segments.contains_key(id) {
-                //         let raw = value.get::<u64>().unwrap_or_default();
-                //         if raw == u64::MAX {
-                //             segments.get_mut(id).unwrap().duration = None;
-                //         } else {
-                //             segments.get_mut(id).unwrap().duration = Some(raw);
-                //         }
-                //         self.notify(pspec);
-                //     }
-                // },
-                // n if n.starts_with("offset-") => {
-                //     let id = &n["offset-".len()..];
-                //     let segments = &mut self.segments.borrow_mut();
-                //     if segments.contains_key(id) {
-                //         let raw = value.get::<u64>().unwrap_or_default();
-                //         segments.get(id).unwrap().offset.set_time(raw);
-                //         self.notify(pspec);
-                //         self.notify_time_relative(id);
-                //     }
-                // }
                 _ => {}
             }
         }

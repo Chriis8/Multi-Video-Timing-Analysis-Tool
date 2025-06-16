@@ -1,3 +1,4 @@
+use gstreamer::prelude::{ClockExt, ElementExt, PipelineExt};
 use gstreamer::MessageView;
 use gtk::glib;
 use glib::subclass::Signal;
@@ -10,7 +11,8 @@ use std::collections::{HashMap, HashSet};
 use gstreamer::ClockTime;
 use glib::Object;
 use gstreamer::bus::BusWatchGuard;
-use gstreamer::bus;
+use gstreamer::Clock;
+use std::cell::OnceCell;
 
 
 mod imp {
@@ -22,6 +24,7 @@ mod imp {
         pub playing_pipelines: Arc<Mutex<HashSet<String>>>,
         pub on_all_playing: Arc<Mutex<Option<Box<dyn FnOnce() + Send + 'static>>>>,
         pub buses: Arc<Mutex<HashMap<String, BusWatchGuard>>>,
+        pub shared_clock: OnceCell<Clock>
     }
     
     #[gtk::glib::object_subclass]
@@ -64,6 +67,7 @@ impl SyncManager {
         let object: Self = glib::Object::new::<Self>();
         let imp = imp::SyncManager::from_obj(&object);
         *imp.on_all_playing.lock().unwrap() = None;
+        imp.shared_clock.set(gstreamer::SystemClock::obtain().upcast());
         object
     }
 
@@ -185,5 +189,44 @@ impl SyncManager {
         let mut callback = imp.on_all_playing.lock().unwrap();
         println!("Set callback");
         *callback = Some(Box::new(f));
+    }
+
+    pub fn sync_clocks(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let imp = self.imp();
+
+        for pipeline_weak in imp.pipelines.lock().unwrap().values() {
+            let video_pipeline = pipeline_weak.upgrade().unwrap();
+            let pipeline = video_pipeline.lock().unwrap().pipeline().unwrap();
+            pipeline.state(ClockTime::from_seconds(5)).0?;
+        }
+        
+        let sync_time = imp.shared_clock.get().unwrap().time().unwrap();
+        for pipeline_weak in imp.pipelines.lock().unwrap().values() {
+            let video_pipeline = pipeline_weak.upgrade().unwrap();
+            let pipeline = video_pipeline.lock().unwrap().pipeline().unwrap();
+            pipeline.use_clock(imp.shared_clock.get());
+            pipeline.set_base_time(sync_time);
+        }
+        Ok(())
+    }
+
+    pub fn unsync_clocks(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let imp = self.imp();
+
+        for pipeline_weak in imp.pipelines.lock().unwrap().values() {
+            let video_pipeline = pipeline_weak.upgrade().unwrap();
+            let pipeline = video_pipeline.lock().unwrap().pipeline().unwrap();
+            pipeline.state(ClockTime::from_seconds(5)).0?;
+        }
+
+        for pipeline_weak  in imp.pipelines.lock().unwrap().values() {
+            let video_pipeline = pipeline_weak.upgrade().unwrap();
+            let pipeline = video_pipeline.lock().unwrap().pipeline().unwrap();
+            pipeline.use_clock(None::<&Clock>);
+            if let Some(clock) = pipeline.clock() {
+                pipeline.set_base_time(clock.time().unwrap());
+            }
+        }
+        Ok(())
     }
 }

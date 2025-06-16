@@ -536,6 +536,7 @@ impl SharedSeekBar {
         let video_player_container = borrow_asref_upgrade(&imp.video_player_container).ok().unwrap();
         let split_table = borrow_asref_upgrade(&imp.split_table).ok().unwrap();
         let split_table_liststore = borrow_asref_upgrade(&imp.split_table_liststore).ok().unwrap();
+        let sync_manager = borrow_asref_upgrade(&imp.sync_manager).ok().unwrap();
         
         let status = imp.has_control.get();
         for child in flowbox_children(&video_player_container) {
@@ -581,8 +582,16 @@ impl SharedSeekBar {
                     eprintln!("Player {video_player_id} error setting position: {e}");
                 }
                 imp.seek_bar.get_scale().set_value(0.0);
+                drop(pipeline);
+                if let Err(e) = sync_manager.sync_clocks() {
+                    eprintln!("Error syncing clocks {e}");
+                }
             } else {
                 pipeline.reset_clamps();
+                drop(pipeline);
+                if let Err(e) = sync_manager.unsync_clocks() {
+                    eprintln!("Error unsyncing clocks {e}");  
+                }
             }
             video_player.set_controls(status);
         }

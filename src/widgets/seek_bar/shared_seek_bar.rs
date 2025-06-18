@@ -575,7 +575,24 @@ impl SharedSeekBar {
             if !status {
                 let offset = split_table.get_offset_time_entry(video_player_id.as_str());
                 let start_time = gstreamer::ClockTime::from_nseconds(offset.get_time());
-                let end_time = split_table.get_previous_time(video_player_id.as_str(), split_table_liststore.n_items() - 1).unwrap_or(pipeline.get_length().unwrap());
+                let mut end_time = pipeline.get_length().unwrap();
+                if split_table_liststore.n_items() > 0 {
+                    match split_table.get_previous_time(video_player_id.as_str(), split_table_liststore.n_items() - 1) {
+                        Some(time) => { end_time = time },
+                        None => {
+                            let pipeline_length = pipeline.get_length().unwrap();
+                            if pipeline_length > imp.seek_bar.get_timeline_length() {
+                                imp.seek_bar.set_timeline_length(pipeline_length);
+                            }
+                            end_time = pipeline_length;
+                        }
+                    }
+                } else {
+                    let pipeline_length = pipeline.get_length().unwrap();
+                    if pipeline_length > imp.seek_bar.get_timeline_length() {
+                        imp.seek_bar.set_timeline_length(pipeline_length);
+                    }
+                }
                 pipeline.set_start_clamp(start_time.nseconds());
                 pipeline.set_end_clamp(end_time);
                 if let Err(e) = pipeline.seek_position(start_time) {
@@ -631,73 +648,5 @@ impl SharedSeekBar {
 
         self.update_timeline_length();
     }
-
-    // let video_player_container = borrow_asref_upgrade(&video_player_container_weak).ok().unwrap();
-    //                 let split_table_liststore = borrow_asref_upgrade(&split_table_liststore_weak).ok().unwrap();
-    //                 let sync_manager = borrow_asref_upgrade(&sync_manager_weak).ok().unwrap();
-    //                 let split_table = borrow_asref_upgrade(&split_table_weak).ok().unwrap();
-
-    //                 let now = Instant::now();
-    //                 let mut last_click = last_click.borrow_mut();
-
-    //                 if let Some(last_time) = *last_click {
-    //                     if now.duration_since(last_time) < *debounce_duration.borrow() {
-    //                         return;
-    //                     }
-    //                 }
-
-    //                 *last_click = Some(now);
-    //                 drop(last_click);
-                    
-    //                 let mut pipeline_clamp_times: HashMap<String, (ClockTime, ClockTime)> = HashMap::new();
-                    
-    //                 let mut state = is_paused.get();
-    //                 for child in flowbox_children(&video_player_container) {
-    //                     let fb_child = match child.downcast_ref::<FlowBoxChild>() {
-    //                         Some(c) => c,
-    //                         None => continue,
-    //                     };
-
-    //                     let content = match fb_child.child() {
-    //                         Some(c) => c,
-    //                         None => continue,
-    //                     };
-
-    //                     let video_player = match content.downcast_ref::<VideoPlayer>() {
-    //                         Some(vp) => vp,
-    //                         None => continue,
-    //                     };
-    //                     let video_player_id = video_player.get_id();
-    //                     if state == false {
-    //                         let start_time_offset = split_table.get_offset_time_entry(video_player_id.as_str()).get_time();
-    //                         let start_time_for_syncing = if starting_segment.get() == 0 { start_time_offset } else { 
-    //                             split_table_liststore.item(starting_segment
-    //                                 .get()
-    //                                 .saturating_sub(1))
-    //                                 .and_downcast::<VideoSegment>()
-    //                                 .unwrap()
-    //                                 .get_time(video_player_id.as_str()
-    //                             )};
-    //                         let last_mark_position = split_table.get_previous_time(video_player_id.as_str(), split_table_liststore.n_items() - 1).unwrap();
-    //                         pipeline_clamp_times.insert(video_player_id, (ClockTime::from_nseconds(start_time_for_syncing), ClockTime::from_nseconds(last_mark_position)));
-                            
-    //                         sync_manager.clear_state();
-        
-    //                         sync_manager.set_on_all_playing(glib::clone!(
-    //                             #[weak(rename_to = start_instant)] scale_start_instant,
-    //                             move || {
-    //                                 let now = Instant::now();
-    //                                 println!("callbacked now: {now:?}");
-    //                                 *start_instant.lock().unwrap() = Some(now);
-    //                             }
-    //                         ));
-    //                         sync_manager.play_videos(pipeline_clamp_times);
-    //                         scale_start_offset.set(seek_bar.get_scale().value());
-    //                     } else  {
-
-    //                     }
-    //                 }
-    //                 is_paused.set(!is_paused.get());
-    //             }
 }
 

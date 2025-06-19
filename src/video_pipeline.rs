@@ -1,7 +1,8 @@
-use std::{cell::RefCell};
-use gstreamer::{event::{Seek, Step}, prelude::*, ClockTime, Pipeline, SeekFlags, SeekType };
+use std::{cell::RefCell, iter::Once, time::Duration};
+use gstreamer::{event::{Seek, Step}, prelude::*, ClockTime, Pipeline, SeekFlags, SeekType, Element };
 use gtk;
 use gtk::gdk;
+use once_cell::sync::OnceCell;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum PlaybackDirection {
@@ -28,6 +29,7 @@ pub struct VideoPipeline {
     gtksink: gstreamer::Element,
     pipeline: gstreamer::Pipeline,
     state: RefCell<PipelineState>,
+    frame_duration: OnceCell<u64>,
 }
 
 
@@ -38,6 +40,7 @@ impl VideoPipeline {
             gtksink: gstreamer::ElementFactory::make("gtk4paintablesink").property("sync", true).build().unwrap(),
             pipeline: gstreamer::Pipeline::new(),
             state: RefCell::new(PipelineState::new()),
+            frame_duration: OnceCell::new(),
         }
     }
 
@@ -114,6 +117,37 @@ impl VideoPipeline {
 
         let percent = position_ns as f64 / duration_ns as f64 * 100.0;
         
+        Ok(percent)
+    }
+
+    pub fn position_to_logical_percent(&self) -> Result<f64, glib::Error> {
+        let mut attempts = 0;
+        const MAX_ATTEMPTS: u8 = 20;
+        let mut position_opt: Option<ClockTime> = None;
+        loop {
+            if let Some(pos) = self.pipeline.query_position::<ClockTime>() {
+                position_opt = Some(pos);
+                break;
+            } else {
+                attempts += 1;
+                println!("attempts at getting position to logical percent");
+                if attempts >= MAX_ATTEMPTS {
+                    break;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let position = match position_opt {
+            Some(pos) => pos,
+            None => {
+                eprintln!("Failed to get pipeline position");
+                return Err(glib::Error::new(glib::FileError::Failed, "Failed to get pipeline position"));
+            }
+        };
+        let logical_duration = self.get_logical_duration();
+        let position_ns = position.nseconds().saturating_sub(self.get_start());
+
+        let percent = (position_ns as f64 / logical_duration as f64);
         Ok(percent)
     }
 
@@ -238,7 +272,9 @@ impl VideoPipeline {
         self.pipeline
             .set_state(gstreamer::State::Paused)
             .expect("Failed to set pipeline state to paused");
-        
+
+        self.set_frame_duration();
+
     }
 
     // Returns paintable object for gtk widget
@@ -466,6 +502,57 @@ impl VideoPipeline {
 
     pub fn pipeline(&self) -> Option<Pipeline> {
         return Some(self.pipeline.clone());
+    }
+
+    pub fn get_logical_duration(&self) -> u64 {
+        return self.state.borrow().end.unwrap() - self.state.borrow().start;
+    }
+
+    pub fn get_start(&self) -> u64 {
+        return self.state.borrow().start;
+    }
+
+    pub fn get_end(&self) -> Option<u64> {
+        return self.state.borrow().end;
+    }
+
+    pub fn set_frame_duration(&self) -> Option<u64> {
+        let sink = self.pipeline.iterate_sinks().into_iter().find_map(|element| {
+            if let Ok(element) = element {
+                if element.class().metadata("klass").map_or(false, |klass| klass.contains("Video")) {
+                    Some(element)
+                } else {
+                    eprintln!("5");
+                    None
+                }
+            } else {
+                eprintln!("6");
+                None
+            }
+        });
+
+        match sink {
+            Some(sink) => {
+                if let Some(caps) = sink.static_pad("sink").and_then(|pad| pad.current_caps()) {
+                    if let Some(structure) = caps.structure(0) {
+                        if let Ok(framerate) = structure.get::<gstreamer::Fraction>("framerate") {
+                            let fps = framerate.numer() as f64 / framerate.denom() as f64;
+                            let frame_duration_ns = (1_000_000_000.0 / fps) as u64;
+                            let _ = self.frame_duration.set(frame_duration_ns);
+                            return Some(frame_duration_ns);
+                        } else {
+                            eprintln!("1");
+                        }
+                    } else {
+                        eprintln!("2");
+                    }
+                } else {
+                    eprintln!("3");
+                }
+            }
+            None => { eprintln!("4")}
+        };
+        None
     }
 }
 

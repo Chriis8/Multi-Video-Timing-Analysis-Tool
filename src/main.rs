@@ -63,6 +63,11 @@ fn build_ui(app: &Application) -> Builder {
 
     let ssb = SharedSeekBar::new(&video_container, &split_table_cv, &start_time_offset_ls, &split_table_ls, &sync_manager, &split_table);
     bottom_vbox.append(&ssb);
+
+    let shared_seek_bar_clone = ssb.clone();
+    sync_manager.add_sync_callback(move |event| {
+        shared_seek_bar_clone.handle_sync_event(event);
+    });
     
     // Adds an initial row
     //split_table.append_empty_row();

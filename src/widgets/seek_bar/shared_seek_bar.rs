@@ -139,8 +139,10 @@ mod imp {
                 #[strong(rename_to = sync_manager_weak)] self.sync_manager,
                 #[strong(rename_to = last_click)] self.last_click,
                 #[strong(rename_to = debounce_duration)] self.debounce_duration,
+                #[strong(rename_to = split_table_weak)] self.split_table,
                 move |_| {
                     let sync_manager = borrow_asref_upgrade(&sync_manager_weak).ok().unwrap();
+                    let split_table = borrow_asref_upgrade(&split_table_weak).ok().unwrap();
 
                     let now = Instant::now();
                     let mut last_click = last_click.borrow_mut();
@@ -167,7 +169,14 @@ mod imp {
                         //         *start_instant.lock().unwrap() = Some(now);
                         //     }
                         // ));
-                        sync_manager.play_videos();
+                        let mut offsets: HashMap<String, u64> = HashMap::new();
+                        let offsets_row_map = split_table.get_start_time_offset_row_map();
+
+                        for (video_player_id, offset_time_entry) in offsets_row_map.borrow().iter() {
+                            offsets.insert(video_player_id.to_string(), offset_time_entry.get_time());
+                        }
+                        
+                        sync_manager.play_videos(offsets);
                         scale_start_offset.set(seek_bar.get_scale().value());
                     } else {
                         sync_manager.pause_videos();
@@ -397,10 +406,12 @@ mod imp {
                 #[strong(rename_to = video_player_container_weak)] self.video_player_container,
                 #[strong(rename_to = start_time_offset_liststore_weak)] self.start_time_offset_liststore,
                 #[strong(rename_to = sync_manager_weak)] self.sync_manager,
+                #[strong(rename_to = split_table_weak)] self.split_table,
                 move |_,_,_x,_y| {
                     //let video_player_container = borrow_asref_upgrade(&video_player_container_weak).ok().unwrap();
                     let start_time_offset_liststore = borrow_asref_upgrade(&start_time_offset_liststore_weak).ok().unwrap();
                     let sync_manager = borrow_asref_upgrade(&sync_manager_weak).ok().unwrap();
+                    let split_table = borrow_asref_upgrade(&split_table_weak).ok().unwrap();
                     // for (video_player_index, child) in flowbox_children(&video_player_container).enumerate() {
                     //     let fb_child = match child.downcast_ref::<FlowBoxChild>() {
                     //         Some(c) => c,
@@ -434,13 +445,18 @@ mod imp {
                     //     };
 
                     // }
-                    let offset_time_entry = start_time_offset_liststore.item(0u32).and_downcast::<TimeEntry>().unwrap();
-                    let offset_time = offset_time_entry.get_time();
-                    let percent_position = seek_bar.get_scale().value() / 100.0;
-                    let position = (percent_position * seek_bar.get_timeline_length() as f64) as u64;
-                    let clock_time_position = ClockTime::from_nseconds(position + offset_time);
+                    let mut clock_positions: HashMap<String, ClockTime> = HashMap::new();
+
+                    let start_time_offset_row_map = split_table.get_start_time_offset_row_map();
+                    for (video_player_id, offset) in start_time_offset_row_map.borrow().iter() {
+                        let offset_time = offset.get_time();
+                        let percent_position = seek_bar.get_scale().value() / 100.0;
+                        let position = (percent_position * seek_bar.get_timeline_length() as f64) as u64;
+                        let clock_time_position = ClockTime::from_nseconds(position + offset_time);
+                        clock_positions.insert(video_player_id.to_string(), clock_time_position);
+                    }
                     //pipeline.seek_position(clock_time_position).expect("Failed to seek to synced position");
-                    sync_manager.seek(clock_time_position);
+                    sync_manager.seek(clock_positions);
                     is_dragging.set(false);
                 }
                 
@@ -850,9 +866,9 @@ impl SharedSeekBar {
                 println!("PlaybackPaused");
                 self.stop_progress();
             },
-            SyncEvent::Seeked { new_base_time, position } => {
-                println!("Seeked: new_base_time: {new_base_time}, position: {position}");
-
+            SyncEvent::Seeked => {
+                //println!("Seeked: new_base_time: {new_base_time}, position: {position}");
+                println!("Seeked");
             },
         }
     }

@@ -252,7 +252,7 @@ impl VideoPlayer {
         if let Some(gstman) = gstman_weak.upgrade() {
             if let Ok(pipeline) = gstman.lock() {
                 // gets seek bar progress 0.0 - 1.0
-                let percent = imp.seek_bar.get_scale().value() / 100.0;
+                let percent = (imp.seek_bar.get_scale().value() / 100.0) as f64;
                 // Gets precentage time in nanoseconds of the total videos duration
                 let position = pipeline.percent_to_position(percent).expect("Failed to get position");
                 println!("Position: {position}");

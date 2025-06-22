@@ -15,6 +15,7 @@ use gstreamer::Clock;
 use gstreamer::prelude::*;
 use std::cell::{RefCell, Cell, OnceCell};
 use std::rc::Rc;
+use crate::widgets::split_panel::timeentry::TimeEntry;
 
 #[derive(Clone, Debug)]
 pub enum SyncEvent {
@@ -22,7 +23,7 @@ pub enum SyncEvent {
     SyncDisabled,
     PlaybackStarted { base_time: ClockTime, scale_position: ClockTime },
     PlaybackPaused,
-    Seeked { new_base_time: ClockTime, position: ClockTime },
+    Seeked,
 }
 
 mod imp {
@@ -38,8 +39,8 @@ mod imp {
         pub shared_clock: OnceCell<Clock>,
         pub sync_callbacks: RefCell<Vec<Box<dyn Fn(SyncEvent)>>>,
         pub is_synced: Rc<Cell<bool>>,
-        pub current_base_time: RefCell<Option<ClockTime>>,
-        pub video_fps: RefCell<HashMap<String, u64>>,
+        //pub current_base_time: RefCell<Option<ClockTime>>,
+        //pub video_fps: RefCell<HashMap<String, u64>>,
     }
     
     #[gtk::glib::object_subclass]
@@ -95,8 +96,8 @@ impl SyncManager {
         let pipeline_lock = pipeline_arc.lock().unwrap();
         let bus = pipeline_lock.get_bus().unwrap();
         let name = pipeline_id.to_string();
-        let fps = pipeline_lock.set_frame_duration().unwrap();
-        imp.video_fps.borrow_mut().insert(pipeline_id.to_string(), fps);
+        //let fps = pipeline_lock.set_frame_duration().unwrap();
+        //imp.video_fps.borrow_mut().insert(pipeline_id.to_string(), fps);
         // let bus_source_id = bus.add_watch_local(glib::clone!(
         //     #[strong(rename_to = name)] name,
         //     #[strong(rename_to = this)] self,
@@ -130,25 +131,30 @@ impl SyncManager {
         //imp.buses.lock().unwrap().remove(pipeline_id);
     }
 
-    pub fn play_videos(&self) {
+    pub fn play_videos(&self, offsets: HashMap<String, u64>) {
         let imp = self.imp();
         if imp.is_synced.get() {
             return;
         }
+        let shared_clock_time = imp.shared_clock.get().unwrap().time().unwrap();
+        // let new_base_time = imp.shared_clock.get().unwrap().time().unwrap();
+        // self.apply_base_time_to_all(new_base_time);
 
-        let new_base_time = imp.shared_clock.get().unwrap().time().unwrap();
-        self.apply_base_time_to_all(new_base_time);
-
-        for (i, pipeline_weak) in imp.pipelines.lock().unwrap().iter() {
-            let pipeline = match pipeline_weak.upgrade() {
+        for (video_player_id, pipeline_weak) in imp.pipelines.lock().unwrap().iter() {
+            let video_pipeline = match pipeline_weak.upgrade() {
                 Some(p) => p,
                 None => return,
             };
-            pipeline.lock().unwrap().play_video();
+
+            let pipeline = video_pipeline.lock().unwrap();
+            pipeline.pipeline().unwrap().use_clock(imp.shared_clock.get());
+            let offset_time = offsets.get(video_player_id).unwrap();
+            pipeline.pipeline().unwrap().set_base_time(shared_clock_time + ClockTime::from_nseconds(*offset_time));
+            pipeline.play_video();
         }
 
         let scale_position = self.get_current_logical_position();
-        self.emit_event(SyncEvent::PlaybackStarted { base_time: new_base_time, scale_position: scale_position });
+        self.emit_event(SyncEvent::PlaybackStarted { base_time: shared_clock_time, scale_position: scale_position });
     }
 
     pub fn pause_videos(&self) {
@@ -215,20 +221,27 @@ impl SyncManager {
 
     }
 
-    pub fn seek(&self, position: ClockTime) {
+    pub fn seek(&self, positions: HashMap<String, ClockTime>) {
         let imp = self.imp();
-        for pipeline_weak in imp.pipelines.lock().unwrap().values() {
-            let pipeline = match pipeline_weak.upgrade() {
+        let shared_clock_time = imp.shared_clock.get().unwrap().time().unwrap();
+        for (video_player_id, pipeline_weak) in imp.pipelines.lock().unwrap().iter() {
+            let video_pipeline = match pipeline_weak.upgrade() {
                 Some(p) => p,
                 None => return,
             };
-            let _ = pipeline.lock().unwrap().seek_position(position);
+            let position = positions.get(video_player_id.as_str()).unwrap();
+            let pipeline = video_pipeline.lock().unwrap();
+            pipeline.pipeline().unwrap().set_base_time(shared_clock_time - *position);
+            pipeline.pipeline().unwrap().use_clock(imp.shared_clock.get());
+            
+            let _ = pipeline.seek_position(*position);
+
         }
 
-        let new_base_time = imp.shared_clock.get().unwrap().time().unwrap() - position;
-        self.apply_base_time_to_all(new_base_time);
+        // let new_base_time = imp.shared_clock.get().unwrap().time().unwrap() - position;
+        // self.apply_base_time_to_all(new_base_time);
         //let scale_position = self.get_current_logical_position();
-        self.emit_event(SyncEvent::Seeked { new_base_time: new_base_time , position: position });
+        self.emit_event(SyncEvent::Seeked);
     }
 
     // pub fn mark_pipeline_playing(&self, pipeline_id: &str) {
@@ -321,15 +334,15 @@ impl SyncManager {
         }
     }
 
-    fn get_current_media_time(&self) -> Result<ClockTime, Box<dyn std::error::Error>> {
-        let imp = self.imp();
-        if let Some(base_time) = imp.current_base_time.borrow().as_ref() {
-            let clock_time = imp.shared_clock.get().unwrap().time().unwrap();
-            Ok(clock_time - *base_time)
-        } else {
-            Err("No base time set".into())
-        }
-    }
+    // fn get_current_media_time(&self) -> Result<ClockTime, Box<dyn std::error::Error>> {
+    //     let imp = self.imp();
+    //     if let Some(base_time) = imp.current_base_time.borrow().as_ref() {
+    //         let clock_time = imp.shared_clock.get().unwrap().time().unwrap();
+    //         Ok(clock_time - *base_time)
+    //     } else {
+    //         Err("No base time set".into())
+    //     }
+    // }
 
     fn apply_base_time_to_all(&self, base_time: ClockTime) {
         let imp = self.imp();
@@ -340,7 +353,7 @@ impl SyncManager {
             pipeline.use_clock(imp.shared_clock.get());
             pipeline.set_base_time(base_time);
         }
-        *imp.current_base_time.borrow_mut() = Some(base_time);
+        //*imp.current_base_time.borrow_mut() = Some(base_time);
     }
 
     fn get_current_logical_position(&self) -> ClockTime {

@@ -1,4 +1,5 @@
 use std::{cell::RefCell, iter::Once, time::Duration};
+use glib::BoolError;
 use gstreamer::{event::{Seek, Step}, prelude::*, ClockTime, Pipeline, SeekFlags, SeekType, Element };
 use gtk;
 use gtk::gdk;
@@ -90,8 +91,21 @@ impl VideoPipeline {
     }
 
     // Sets video playback to inputted ClockTime
-    pub fn seek_position(&self, position: gstreamer::ClockTime) -> Result<(), glib::BoolError> {
-        self.pipeline.seek_simple(gstreamer::SeekFlags::FLUSH, position)
+    pub fn seek_position(&self, position: gstreamer::ClockTime) -> Result<(), Box<dyn std::error::Error>> {
+        let duration = self.pipeline.query_duration::<ClockTime>().ok_or("failed to get pipeline position")?;
+        if position == duration {
+            let frame_time = match self.frame_duration.get() {
+                Some(duration) => *duration,
+                None => self.set_frame_duration().unwrap(),
+            };
+            let seek_position = position - ClockTime::from_nseconds(frame_time);
+            self.pipeline.seek_simple(gstreamer::SeekFlags::FLUSH, seek_position)?;
+            println!("seeked safely to end: (1 frame before): Position: {position}, safe position: {seek_position}");
+        } else {
+            self.pipeline.seek_simple(gstreamer::SeekFlags::FLUSH, position)?;
+            println!("seeked to {position}");
+        }
+        Ok(())
     }
 
     // Retrieves the percent complete the video playback is at
@@ -273,8 +287,6 @@ impl VideoPipeline {
             .set_state(gstreamer::State::Paused)
             .expect("Failed to set pipeline state to paused");
 
-        self.set_frame_duration();
-
     }
 
     // Returns paintable object for gtk widget
@@ -402,7 +414,6 @@ impl VideoPipeline {
 
     // Moves video one frame forward
     pub fn frame_forward(&self) {
-        println!("---------- (Frame forwards Before) video time: {:?}", self.pipeline.query_position::<gstreamer::ClockTime>());
         if self.pipeline.current_state() != gstreamer::State::Paused {
             eprintln!("Can't step 1 frame forward. Video is not paused");
             return;
@@ -420,12 +431,10 @@ impl VideoPipeline {
         if !success {
             eprintln!("Failed to move one frame forward");
         }
-        eprintln!("---------- (Frame forwards After) video time: {:?}", self.pipeline.query_position::<gstreamer::ClockTime>());
     }
 
     // Moves video one frame backward
     pub fn frame_backward(&self) {
-        eprintln!("---------- (Frame backwards Before) video time: {:?}", self.pipeline.query_position::<gstreamer::ClockTime>());
         if self.pipeline.current_state() != gstreamer::State::Paused {
             eprintln!("Can't step 1 frame backward. Video is not paused");
             return;
@@ -443,7 +452,6 @@ impl VideoPipeline {
         if !success {
             eprintln!("Failed to move one frame backward");
         }
-        eprintln!("---------- (Frame backwards After) video time: {:?}", self.pipeline.query_position::<gstreamer::ClockTime>());
     }
 
     // Prints the currect frame the video is on

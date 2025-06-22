@@ -632,6 +632,11 @@ impl SplitTable {
         imp.start_time_offset_row_map.borrow().get(video_player_id).unwrap().clone()
     }
 
+    pub fn get_start_time_offset_row_map(&self) -> RefCell<HashMap<String, TimeEntry>> {
+        let imp = self.imp();
+        imp.start_time_offset_row_map.clone()
+    }
+
     pub fn remove_column(&self, video_player_id: &str) {
         let imp = self.imp();
         let split_table_liststore_borrow = imp.split_table_liststore.borrow();

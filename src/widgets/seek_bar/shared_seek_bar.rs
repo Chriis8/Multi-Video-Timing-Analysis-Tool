@@ -716,7 +716,7 @@ impl SharedSeekBar {
                 }
             };
 
-            let pipeline = match arc.lock() {
+            let mut pipeline = match arc.lock() {
                 Ok(g) => g,
                 Err(_) => {
                     eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
@@ -729,7 +729,7 @@ impl SharedSeekBar {
             let start_time = gstreamer::ClockTime::from_nseconds(offset.get_time());
             let mut end_time = pipeline.get_length().unwrap();
             if split_table_liststore.n_items() > 0 {
-                match split_table.get_previous_time(video_player_id.as_str(), split_table_liststore.n_items() - 1) {
+                match split_table.get_previous_time(video_player_id.as_str(), split_table_liststore.n_items()) {
                     Some(time) => { end_time = time },
                     None => {
                         if end_time > imp.seek_bar.get_timeline_length() {
@@ -742,11 +742,16 @@ impl SharedSeekBar {
                     imp.seek_bar.set_timeline_length(end_time);
                 }
             }
-            pipeline.set_start_clamp(start_time.nseconds());
-            pipeline.set_end_clamp(end_time);
+            let _ = pipeline.apply_clamp(start_time, ClockTime::from_nseconds(end_time));
+            // pipeline.set_start_clamp(start_time.nseconds());
+            // pipeline.set_end_clamp(end_time);
+            // if let Err(e) = pipeline.apply_clamp() {
+            //     eprintln!("Player {video_player_id} error applying clamp: {e}");
+            // }
             if let Err(e) = pipeline.seek_position(start_time) {
                 eprintln!("Player {video_player_id} error setting position: {e}");
             }
+            //pipeline.set_direction_forward();
             video_player.set_controls(false);
         }
         imp.seek_bar.get_scale().set_value(0.0);
@@ -792,7 +797,7 @@ impl SharedSeekBar {
                 }
             };
 
-            let pipeline = match arc.lock() {
+            let mut pipeline = match arc.lock() {
                 Ok(g) => g,
                 Err(_) => {
                     eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
@@ -800,12 +805,12 @@ impl SharedSeekBar {
                 }
             };
             pipeline.pause_video();
-            pipeline.reset_clamps();
+            let _ = pipeline.reset_clamps();
             drop(pipeline);
-            if let Err(e) = sync_manager.unsync_clocks() {
-                eprintln!("Error unsyncing clocks {e}");  
-            }
             video_player.set_controls(true);
+        }
+        if let Err(e) = sync_manager.unsync_clocks() {
+            eprintln!("Error unsyncing clocks {e}");  
         }
         imp.is_paused.set(true);
         imp.has_control.set(false);
@@ -827,10 +832,10 @@ impl SharedSeekBar {
                 if let Some(current_time) = clock.time() {
                     if current_time >= base_time {
                         let media_time = current_time - base_time + scale_position;
-                        println!("Media Time: {media_time}");
+                        //println!("Media Time: {media_time}");
                         let position = media_time.nseconds() as f64;
                         let new_scale_position = (position / seek_bar.get_timeline_length() as f64) * 100.0;
-                        println!("new_scale_position: {new_scale_position}");
+                        //println!("new_scale_position: {new_scale_position}");
                         seek_bar.get_scale().set_value(new_scale_position);
                         if media_time >= timeline_length {
                             *timeout_ref.borrow_mut() = None;

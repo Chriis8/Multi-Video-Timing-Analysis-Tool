@@ -1,4 +1,5 @@
 use glib::timeout_add_local;
+use gstreamer::prelude::ElementExtManual;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -234,9 +235,8 @@ impl VideoPlayer {
             if let Some(gstman) = gstman_weak.upgrade() {
                 if let Ok(pipeline) = gstman.lock() {
                     if let Ok(new_value) = pipeline.position_to_percent() {
+                        println!("new scale value: {new_value}");
                         seek_bar_clone.set_value(new_value);
-                    } else {
-                        eprintln!("Could not acquire pipeline in start_updating_scale");
                     }
                 }
             }
@@ -264,7 +264,6 @@ impl VideoPlayer {
 
     // Connects user control
     fn connect_scale_drag_signals(&self, scale_box: &crate::SeekBar) {
-
         let imp = imp::VideoPlayer::from_obj(self);
 
         let gesture = gtk::GestureClick::new();

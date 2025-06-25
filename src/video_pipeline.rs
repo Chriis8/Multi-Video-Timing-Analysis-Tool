@@ -1,9 +1,11 @@
-use std::{cell::RefCell, iter::Once, time::Duration};
+use std::{cell::RefCell, iter::Once, thread::{self, current}, time::Duration};
 use glib::BoolError;
-use gstreamer::{event::{Seek, Step}, prelude::*, ClockTime, Pipeline, SeekFlags, SeekType, Element };
-use gtk;
+use gstreamer::{event::{Seek, Step}, prelude::*, Clock, ClockTime, Element, Pipeline, SeekFlags, SeekType };
+use gtk::{self, Ordering};
 use gtk::gdk;
 use once_cell::sync::OnceCell;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicBool;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum PlaybackDirection {
@@ -13,16 +15,52 @@ pub enum PlaybackDirection {
 
 pub struct PipelineState {
     pub direction: PlaybackDirection,
-    pub start: u64,
-    pub end: Option<u64>,
+}
+
+pub struct VideoClamp {
+    start_time: ClockTime,
+    end_time: ClockTime,
+}
+
+impl VideoClamp {
+    pub fn new(start: ClockTime, end: ClockTime) -> Self {
+        VideoClamp { start_time: (start), end_time: (end) }
+    }
+
+    pub fn clamp_position(&self, position: ClockTime) -> ClockTime {
+        position.min(self.end_time).max(self.start_time)
+    }
+
+    pub fn check_and_clamp_position(&self, pipeline: &Pipeline) -> Result<bool, Box<dyn std::error::Error>> {
+        if pipeline.current_state() == gstreamer::State::Playing {
+            if let Some(position) = pipeline.query_position::<ClockTime>() {
+                if position >= self.end_time {
+                    println!("clamping end");
+                    pipeline.set_state(gstreamer::State::Paused)?;
+                    pipeline.state(ClockTime::from_seconds(2)).0?;
+                    pipeline.seek_simple(
+                        SeekFlags::FLUSH | SeekFlags::ACCURATE, 
+                        self.end_time
+                    )?;
+                    return Ok(true);
+                } else if position < self.start_time {
+                    println!("clamping start");
+                    pipeline.seek_simple(
+                        SeekFlags::FLUSH | SeekFlags::ACCURATE, 
+                        self.start_time
+                    )?;
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
 }
 
 impl PipelineState {
     pub fn new() -> Self {
         PipelineState {
             direction: PlaybackDirection::Forward,
-            start: 0u64,
-            end: None,
         }
     }
 }
@@ -31,6 +69,9 @@ pub struct VideoPipeline {
     pipeline: gstreamer::Pipeline,
     state: RefCell<PipelineState>,
     frame_duration: OnceCell<u64>,
+    clamp: Arc<Mutex<Option<VideoClamp>>>,
+    monitor_thread: Option<thread::JoinHandle<()>>,
+    monitor_active: Arc<AtomicBool>,
 }
 
 
@@ -42,6 +83,9 @@ impl VideoPipeline {
             pipeline: gstreamer::Pipeline::new(),
             state: RefCell::new(PipelineState::new()),
             frame_duration: OnceCell::new(),
+            clamp: Arc::new(Mutex::new(None)),
+            monitor_thread: None,
+            monitor_active: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -129,12 +173,14 @@ impl VideoPipeline {
         let position_ns = position.nseconds();
         let duration_ns = total_duration.nseconds();
 
+        println!("position_to_percent: position: {position_ns}, duration: {duration_ns}");
+
         let percent = position_ns as f64 / duration_ns as f64 * 100.0;
         
         Ok(percent)
     }
 
-    pub fn position_to_logical_percent(&self) -> Result<f64, glib::Error> {
+    pub fn position_to_logical_percent(&self) -> Result<f64, String> {
         let mut attempts = 0;
         const MAX_ATTEMPTS: u8 = 20;
         let mut position_opt: Option<ClockTime> = None;
@@ -155,13 +201,14 @@ impl VideoPipeline {
             Some(pos) => pos,
             None => {
                 eprintln!("Failed to get pipeline position");
-                return Err(glib::Error::new(glib::FileError::Failed, "Failed to get pipeline position"));
+                return Err("Failed to get pipeline position".to_string());
             }
         };
-        let logical_duration = self.get_logical_duration();
-        let position_ns = position.nseconds().saturating_sub(self.get_start());
+        let logical_duration = self.get_logical_duration()?.nseconds();
+        let start_time = self.get_start()?;
+        let position_ns = position.saturating_sub(start_time).nseconds();
 
-        let percent = (position_ns as f64 / logical_duration as f64);
+        let percent = position_ns as f64 / logical_duration as f64;
         Ok(percent)
     }
 
@@ -286,6 +333,33 @@ impl VideoPipeline {
         self.pipeline
             .set_state(gstreamer::State::Paused)
             .expect("Failed to set pipeline state to paused");
+        
+        let _ = self.pipeline.state(ClockTime::from_seconds(2));
+
+        self.set_frame_duration();
+        // let mut attempts = 0;
+        // const MAX_ATTEMPTS: u8 = 25;
+        // let mut duration_opt: Option<ClockTime> = None;
+        // loop {
+        //     if let Some(pos) = self.pipeline.query_duration::<ClockTime>() {
+        //         duration_opt = Some(pos);
+        //         break;
+        //     } else {
+        //         attempts += 1;
+        //         println!("attempts at getting duration after setting up pipeline: {attempts}");
+        //         if attempts >= MAX_ATTEMPTS {
+        //             break;
+        //         }
+        //     }
+        //     std::thread::sleep(Duration::from_millis(50));
+        // }
+        // let duration = match duration_opt {
+        //     Some(duration) => duration,
+        //     None => {
+        //         eprintln!("Failed to get pipeline position");
+        //         ClockTime::ZERO
+        //     }
+        // };
 
     }
 
@@ -340,23 +414,6 @@ impl VideoPipeline {
         self.pipeline.set_state(gstreamer::State::Paused).expect("Failed to set pipeline state to Paused");
     }
 
-    pub fn set_start_clamp(&self, start_time: u64) {
-        let mut state = self.state.borrow_mut();
-        state.start = start_time;
-    }
-
-    pub fn set_end_clamp(&self, end_time: u64) {
-        let mut state = self.state.borrow_mut();
-        state.end = Some(end_time);
-    }
-
-    pub fn reset_clamps(&self) {
-        let mut state = self.state.borrow_mut();
-        state.start = 0;
-        let length = self.pipeline.query_duration::<gstreamer::format::Time>().and_then(|clocktime| Some(clocktime.nseconds())).unwrap();
-        state.end = Some(length);
-    }
-
     // Sets the video to the Null state
     pub fn stop_video(&self) {
         self.pipeline
@@ -373,17 +430,27 @@ impl VideoPipeline {
             }
         };
         let mut state = self.state.borrow_mut();
-        let end_time = state.end.unwrap_or(self.pipeline.query_duration::<ClockTime>().and_then(|clock_time| Some(clock_time.nseconds())).unwrap());
+        //let end_time = state.end.unwrap_or(self.pipeline.query_duration::<ClockTime>().and_then(|clock_time| Some(clock_time.nseconds())).unwrap());
+        //let end_time = state.end;
         state.direction = PlaybackDirection::Forward;
         drop(state);
+        // let seek_event =
+        //     Seek::new(
+        //         1.0,
+        //         SeekFlags::FLUSH | SeekFlags::ACCURATE,
+        //         SeekType::Set,
+        //         position,
+        //         SeekType::Set,
+        //         ClockTime::from_nseconds(end_time),
+        //     );
         let seek_event =
             Seek::new(
                 1.0,
                 SeekFlags::FLUSH | SeekFlags::ACCURATE,
                 SeekType::Set,
                 position,
-                SeekType::Set,
-                ClockTime::from_nseconds(end_time),
+                SeekType::End,
+                ClockTime::NONE,
             );
         self.pipeline.send_event(seek_event);
     }
@@ -397,15 +464,24 @@ impl VideoPipeline {
             }
         };
         let mut state = self.state.borrow_mut();
-        let start_time = state.start;
+        //let start_time = state.start;
         state.direction = PlaybackDirection::Reverse;
         drop(state);
+        // let seek_event =
+        //     Seek::new(
+        //         -1.0,
+        //         SeekFlags::FLUSH | SeekFlags::ACCURATE,
+        //         SeekType::Set,
+        //         ClockTime::from_nseconds(start_time),
+        //         SeekType::Set,
+        //         position,
+        //     );
         let seek_event =
             Seek::new(
                 -1.0,
                 SeekFlags::FLUSH | SeekFlags::ACCURATE,
                 SeekType::Set,
-                ClockTime::from_nseconds(start_time),
+                ClockTime::ZERO,
                 SeekType::Set,
                 position,
             );
@@ -492,37 +568,21 @@ impl VideoPipeline {
         }
     }
 
-    pub fn play_video_clam(&self, start: ClockTime, end: ClockTime) {
-        let (_,current_state,_) = self.pipeline.state(gstreamer::ClockTime::NONE);
-        let new_state = match current_state {
-            gstreamer::State::Null => return,
-            gstreamer::State::Playing => gstreamer::State::Paused,
-            _ => gstreamer::State::Playing,
-        };
+    // pub fn play_video_clam(&self, start: ClockTime, end: ClockTime) {
+    //     let (_,current_state,_) = self.pipeline.state(gstreamer::ClockTime::NONE);
+    //     let new_state = match current_state {
+    //         gstreamer::State::Null => return,
+    //         gstreamer::State::Playing => gstreamer::State::Paused,
+    //         _ => gstreamer::State::Playing,
+    //     };
 
-        let mut state = self.state.borrow_mut();
-        self.set_rate(1., start, end);
-        state.direction = PlaybackDirection::Forward;
+    //     let mut state = self.state.borrow_mut();
+    //     self.set_rate(1., start, end);
+    //     state.direction = PlaybackDirection::Forward;
 
-        println!("new state: {:?}", new_state);
-        self.pipeline.set_state(new_state).expect("Failed to set state");
-    }
-
-    pub fn pipeline(&self) -> Option<Pipeline> {
-        return Some(self.pipeline.clone());
-    }
-
-    pub fn get_logical_duration(&self) -> u64 {
-        return self.state.borrow().end.unwrap() - self.state.borrow().start;
-    }
-
-    pub fn get_start(&self) -> u64 {
-        return self.state.borrow().start;
-    }
-
-    pub fn get_end(&self) -> Option<u64> {
-        return self.state.borrow().end;
-    }
+    //     println!("new state: {:?}", new_state);
+    //     self.pipeline.set_state(new_state).expect("Failed to set state");
+    // }
 
     pub fn set_frame_duration(&self) -> Option<u64> {
         let sink = self.pipeline.iterate_sinks().into_iter().find_map(|element| {
@@ -562,6 +622,230 @@ impl VideoPipeline {
         };
         None
     }
+
+    pub fn pipeline(&self) -> Option<Pipeline> {
+        return Some(self.pipeline.clone());
+    }
+
+    pub fn get_logical_duration(&self) -> Result<ClockTime, String> {
+        if let Some(clamp) = self.clamp.lock().unwrap().as_ref() {
+            Ok(clamp.end_time - clamp.start_time)
+        } else {
+            Err("Video is not currently clamped".to_string())
+        }
+    }
+
+    pub fn get_start(&self) -> Result<ClockTime, String> {
+        if let Some(clamp) = self.clamp.lock().unwrap().as_ref() {
+            Ok(clamp.start_time)
+        } else {
+            Err("Video not is currently clamped".to_string())
+        }
+    }
+
+    pub fn get_end(&self) -> Result<ClockTime, String> {
+        if let Some(clamp) = self.clamp.lock().unwrap().as_ref() {
+            Ok(clamp.end_time)
+        } else {
+            Err("Video not is currently clamped".to_string())
+        }
+    }
+
+    // pub fn set_start_clamp(&self, start_time: u64) {
+    //     let mut state = self.state.borrow_mut();
+    //     state.start = start_time;
+    // }
+
+    // pub fn set_end_clamp(&self, end_time: u64) {
+    //     let mut state = self.state.borrow_mut();
+    //     state.end = end_time;
+    // }
+
+    pub fn reset_clamps(&mut self) -> Result<(), String> {
+        *self.clamp.lock().unwrap() = None;
+        self.stop_position_monitor();
+        Ok(())
+        // let mut state = self.state.borrow_mut();
+        // state.start = 0;
+        // let length = self.pipeline.query_duration::<gstreamer::format::Time>().and_then(|clocktime| Some(clocktime.nseconds())).unwrap();
+        // state.end = length;
+    }
+
+    pub fn apply_clamp(&mut self, start: ClockTime, end: ClockTime) -> Result<(), String> {
+        if start > end {
+            return Err("start exceeds end clamp".to_string());
+        }
+        println!("clamping start: {start}, end: {end}");
+        let clamp = VideoClamp::new(start, end);
+        
+        *self.clamp.lock().unwrap() = Some(clamp);
+
+        if !self.monitor_active.load(std::sync::atomic::Ordering::Relaxed) {
+            self.start_position_monitor();
+        }
+
+        self.seek_to_start()?;
+        Ok(())
+    }
+
+    fn seek_to_start(&self) -> Result<(), String> {
+        let position = if let Some(clamp) = self.clamp.lock().unwrap().as_ref() {
+            clamp.start_time.clone()
+        } else {
+            ClockTime::ZERO
+        };
+        self.seek_clamped(position)
+            .map_err(|e| format!("Failed to see to start: {e}"))
+        // if let Some(clamp) = self.clamp.lock().unwrap().as_ref() {
+        //     let start = clamp.start_time.clone();
+        //     // let _ = drop(clamp);
+        //     self.seek_clamped(start)
+        //         .map_err(|e| format!("Failed to seek to start: {e}"))
+        // } else {
+        //     self.seek_clamped(ClockTime::ZERO)
+        //         .map_err(|e| format!("Failed to see to start: {e}"))
+        // }
+    }
+
+    fn seek_to_end(&self) -> Result<(), String> {
+        let position = if let Some(clamp) = self.clamp.lock().unwrap().as_ref() {
+            clamp.end_time.clone()
+        } else if let Some(duration) = self.pipeline.query_duration::<ClockTime>() {
+            duration
+        } else {
+            Err("Could not get video duration".to_string())?
+        };
+        self.seek_clamped(position)
+            .map_err(|e| format!("Failed to seek to end: {e}"))
+        
+        // if let Some(clamp) = self.clamp.lock().unwrap().as_ref() {
+        //     self.seek_clamped(clamp.end_time)
+        //         .map_err(|e| format!("Failed to see to end: {e}"))
+        // } else if let Some(duration) = self.pipeline.query_duration::<ClockTime>() {
+        //     self.seek_clamped(duration)
+        //         .map_err(|e| format!("Failed to seek to end: {e}"))
+        // } else {
+        //     Err("Could not get video duration".to_string())
+        // }
+    }
+
+    pub fn seek_clamped(&self, position: ClockTime) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(clamp) = self.clamp.lock().unwrap().as_ref() {
+            let clamped_pos = clamp.clamp_position(position);
+            self.seek_position(clamped_pos)?
+            // self.pipeline.seek_simple(
+            //     SeekFlags::FLUSH | SeekFlags::ACCURATE, 
+            //     clamped_pos)?
+        } else {
+            self.seek_position(position)?
+        }
+        Ok(())
+        // self.pipeline.seek_simple(
+        //         SeekFlags::FLUSH | SeekFlags::ACCURATE, 
+        //         position)
+    }
+
+    pub fn frame_forward_clamped(&self) -> Result<bool, String> {
+        if let Some(clamp) = self.clamp.lock().unwrap().as_ref() {
+            if let Some(position) = self.pipeline.query_position::<ClockTime>() {
+                let next_position = position + ClockTime::from_nseconds(*self.frame_duration.get().unwrap());
+                if next_position > clamp.end_time {
+                    return Ok(false);
+                }
+
+            }
+        }
+        
+        if self.pipeline.current_state() != gstreamer::State::Paused {
+            eprintln!("Can't step 1 frame forward. Video is not paused");
+            return Ok(false);
+        }
+
+        let state = self.state.borrow();
+        if state.direction == PlaybackDirection::Reverse {
+            drop(state);
+            self.set_direction_forward();
+        }
+
+        let step_event = Step::new(gstreamer::format::Buffers::ONE, 1.0, true, false);
+        println!("Attempting to move one frame forward");
+        if self.pipeline.send_event(step_event) {
+            Ok(true)
+        } else {
+            eprintln!("Failed to move one frame forward");
+            Err("failed to send step event".to_string())
+        }
+    }
+
+    pub fn frame_backward_clamped(&self) -> Result<bool, String> {
+        if let Some(position) = self.pipeline.query_position::<ClockTime>() {
+            let prev_position = position.saturating_sub(ClockTime::from_nseconds(*self.frame_duration.get().unwrap()));
+            if let Some(clamp) = self.clamp.lock().unwrap().as_ref() {
+                if prev_position < clamp.start_time {
+                    return Ok(false);
+                }
+            }
+            
+            if self.pipeline.current_state() != gstreamer::State::Paused {
+                eprintln!("Can't step 1 frame forward. Video is not paused");
+                return Ok(false);
+            }
+    
+            self.seek_clamped(prev_position)
+                .map_err(|e| format!("Failed to step backward: {e}"))?;
+            Ok(true)
+        } else {
+            Err("Could not get video position".to_string())
+        }
+    }
+
+    fn start_position_monitor(&mut self) {
+        if self.monitor_active.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+
+        self.monitor_active.store(true,std::sync::atomic::Ordering::Relaxed);
+
+        let pipeline_weak = self.pipeline.downgrade();
+        let clamp_ref = Arc::clone(&self.clamp);
+        let active_flag = Arc::clone(&self.monitor_active);
+        
+        self.monitor_thread = Some(thread::spawn(move || {
+            let mut last_position = ClockTime::ZERO;
+
+            while active_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                thread::sleep(Duration::from_millis(50));
+
+                if let Some(pipeline) = pipeline_weak.upgrade() {
+                    if let Some(clamp) = clamp_ref.lock().unwrap().as_ref() {
+                        if let Ok(was_clamped) = clamp.check_and_clamp_position(&pipeline) {
+                            if was_clamped {
+                                if let Some(current_pos) = pipeline.query_position::<ClockTime>() {
+                                    if current_pos <= clamp.start_time && last_position > clamp.start_time {
+                                        println!("Start boundary reached, position clamped");
+                                    } else if current_pos >= clamp.end_time && last_position < clamp.end_time {
+                                        println!("End boundary reached, video paused and position clamped");
+                                    }
+                                    last_position = current_pos;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+        }));
+    }
+
+    fn stop_position_monitor(&mut self) {
+        self.monitor_active.store(false, std::sync::atomic::Ordering::Relaxed);
+
+        if let Some(handle) = self.monitor_thread.take() {
+            let _ = handle.join();
+        }
+    }
+
 }
 
 impl Default for VideoPipeline {

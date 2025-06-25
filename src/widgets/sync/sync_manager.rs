@@ -1,5 +1,5 @@
 use gstreamer::prelude::{ClockExt, ElementExt, PipelineExt};
-use gstreamer::MessageView;
+use gstreamer::{MessageView, SeekFlags};
 use gtk::glib;
 use glib::subclass::Signal;
 use once_cell::sync::Lazy;
@@ -8,6 +8,7 @@ use gtk::prelude::*;
 use crate::video_pipeline::VideoPipeline;
 use std::sync::{Weak, Arc, Mutex};
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 use gstreamer::ClockTime;
 use glib::Object;
 use gstreamer::bus::BusWatchGuard;
@@ -16,6 +17,7 @@ use gstreamer::prelude::*;
 use std::cell::{RefCell, Cell, OnceCell};
 use std::rc::Rc;
 use crate::widgets::split_panel::timeentry::TimeEntry;
+use std::thread;
 
 #[derive(Clone, Debug)]
 pub enum SyncEvent {
@@ -28,7 +30,6 @@ pub enum SyncEvent {
 
 mod imp {
     use super::*;
-
 
     #[derive(Default)]
     pub struct SyncManager {
@@ -87,15 +88,16 @@ impl SyncManager {
         object
     }
 
-    pub fn add_pipeline(&self, pipeline_id: &str, pipeline: Weak<Mutex<VideoPipeline>>) {
+    pub fn add_pipeline(&self, pipeline_id: &str, video_pipeline_weak: Weak<Mutex<VideoPipeline>>) -> Result<(), Box<dyn std::error::Error>> {
         let mut imp = self.imp();
-        let pipeline_arc = match pipeline.upgrade() {
+        let video_pipeline_arc = match video_pipeline_weak.upgrade() {
             Some(p) => p,
-            None => return,
+            None => return Err("Failed to upgrade video pipeline".into()),
         };
-        let pipeline_lock = pipeline_arc.lock().unwrap();
-        let bus = pipeline_lock.get_bus().unwrap();
+        let video_pipeline = video_pipeline_arc.lock().unwrap();
+        let bus = video_pipeline.get_bus().unwrap();
         let name = pipeline_id.to_string();
+        
         //let fps = pipeline_lock.set_frame_duration().unwrap();
         //imp.video_fps.borrow_mut().insert(pipeline_id.to_string(), fps);
         // let bus_source_id = bus.add_watch_local(glib::clone!(
@@ -119,7 +121,8 @@ impl SyncManager {
         //     }
         // )).expect(&format!("failed to add bus watch for {pipeline_id}"));
         println!("Adding pipeline into sync manager");
-        imp.pipelines.lock().unwrap().insert(pipeline_id.to_string(), pipeline);
+        imp.pipelines.lock().unwrap().insert(pipeline_id.to_string(), video_pipeline_weak);
+        Ok(())
         //imp.buses.lock().unwrap().insert(pipeline_id.to_string(), bus_source_id);
 
     }
@@ -181,7 +184,10 @@ impl SyncManager {
                 Some(p) => p,
                 None => return,
             };
-            pipeline.lock().unwrap().frame_forward();
+            let result = pipeline.lock().unwrap().frame_forward_clamped();
+            if let Err(e) = result {
+                eprintln!("Sync manager frame forward error: {e}");
+            }
         }
     }
 
@@ -192,7 +198,10 @@ impl SyncManager {
                 Some(p) => p,
                 None => return,
             };
-            pipeline.lock().unwrap().frame_backward();
+            let result = pipeline.lock().unwrap().frame_backward_clamped();
+            if let Err(e) = result {
+                eprintln!("Sync manager frame backward error: {e}");
+            }
         }
 
         // //self.clear_state();
@@ -231,10 +240,13 @@ impl SyncManager {
             };
             let position = positions.get(video_player_id.as_str()).unwrap();
             let pipeline = video_pipeline.lock().unwrap();
-            pipeline.pipeline().unwrap().set_base_time(shared_clock_time - *position);
             pipeline.pipeline().unwrap().use_clock(imp.shared_clock.get());
+            pipeline.pipeline().unwrap().set_base_time(shared_clock_time - *position);
             
-            let _ = pipeline.seek_position(*position);
+            let result = pipeline.seek_clamped(*position);
+            if let Err(e) = result {
+                eprintln!("Failed to perform seek clamped: {e}");
+            }
 
         }
 
@@ -297,19 +309,50 @@ impl SyncManager {
 
     pub fn unsync_clocks(&self) -> Result<(), Box<dyn std::error::Error>> {
         let imp = self.imp();
+        self.pause_videos();
 
         for pipeline_weak in imp.pipelines.lock().unwrap().values() {
-            let video_pipeline = pipeline_weak.upgrade().unwrap();
-            let pipeline = video_pipeline.lock().unwrap().pipeline().unwrap();
-            pipeline.state(ClockTime::from_seconds(5)).0?;
+            if let Some(video_pipeline) = pipeline_weak.upgrade() {
+                let pipeline = video_pipeline.lock().unwrap().pipeline().unwrap();
+                pipeline.state(ClockTime::from_seconds(5)).0?;
+            }
         }
 
-        for pipeline_weak  in imp.pipelines.lock().unwrap().values() {
-            let video_pipeline = pipeline_weak.upgrade().unwrap();
-            let pipeline = video_pipeline.lock().unwrap().pipeline().unwrap();
-            pipeline.use_clock(None::<&Clock>);
-            if let Some(clock) = pipeline.clock() {
-                pipeline.set_base_time(clock.time().unwrap());
+        let mut positions: HashMap<String, ClockTime> = HashMap::new();
+
+        for (id, pipeline_weak) in imp.pipelines.lock().unwrap().iter() {
+            if let Some(video_pipeline) = pipeline_weak.upgrade() {
+                let pipeline = video_pipeline.lock().unwrap().pipeline().unwrap();
+                if let Some(position) = pipeline.query_position::<ClockTime>() {
+                    positions.insert(id.clone(), position);
+                }
+            }
+        }
+
+        for (id, pipeline_weak)  in imp.pipelines.lock().unwrap().iter() {
+            if let Some(video_pipeline) = pipeline_weak.upgrade() {
+                let pipeline = video_pipeline.lock().unwrap().pipeline().unwrap();
+                println!("RESETING CLOCK");
+                //let original_timing_state = original_timing_states.remove(id).unwrap();
+                let _ = pipeline.set_state(gstreamer::State::Null);
+                let _ = pipeline.state(ClockTime::from_seconds(1)).0?;
+
+                pipeline.auto_clock();
+                
+                let _ = pipeline.set_state(gstreamer::State::Paused);
+                let _ = pipeline.state(ClockTime::from_seconds(1)).0?;
+                
+                //pipeline.use_clock(original_timing_state.clock.as_ref());
+                //pipeline.use_clock(None::<&Clock>);
+                if let Some(clock) = pipeline.clock() {
+                    //pipeline.set_base_time(clock.time().unwrap());
+                    //pipeline.set_base_time(original_timing_state.base_time.unwrap());
+                    if let Some(&position) = positions.get(id) {
+                        pipeline.seek_simple(
+                            SeekFlags::FLUSH | SeekFlags::ACCURATE, 
+                            position)?;
+                    } 
+                }
             }
         }
         self.emit_event(SyncEvent::SyncDisabled);
@@ -359,7 +402,7 @@ impl SyncManager {
     fn get_current_logical_position(&self) -> ClockTime {
         if let Some(video_pipeline_arc) = self.get_longest_pipeline() {
             let video_pipeline = video_pipeline_arc.lock().unwrap();
-            let duration = video_pipeline.get_logical_duration();
+            let duration = video_pipeline.get_logical_duration().unwrap().nseconds();
             let percent = video_pipeline.position_to_logical_percent().ok().unwrap();
             let logical_position = (percent * duration as f64) as u64;
             return ClockTime::from_nseconds(logical_position);
@@ -377,10 +420,7 @@ impl SyncManager {
         for pipeline_weak in imp.pipelines.lock().unwrap().values() {
             let video_pipeline_arc = pipeline_weak.upgrade().unwrap();
             let video_pipeline = video_pipeline_arc.lock().unwrap();
-
-
-
-
+            
             let duration = video_pipeline.get_logical_duration();
             if let Some(longest_pipeline_arc) = longest_pipeline.clone() {
                 if duration > longest_pipeline_arc.lock().unwrap().get_logical_duration() {
@@ -392,4 +432,36 @@ impl SyncManager {
         }
         longest_pipeline
     }
+
+    pub fn fix_clock(&self) {
+        let imp = self.imp();
+        for pipeline_weak in imp.pipelines.lock().unwrap().values() {
+            let video_pipeline = pipeline_weak.upgrade().unwrap();
+            let pipeline = video_pipeline.lock().unwrap().pipeline().unwrap();
+
+            let _ = pipeline.set_state(gstreamer::State::Null);
+            let _ = pipeline.state(ClockTime::from_seconds(3)).0;
+            
+            pipeline.auto_clock();
+            // let _ = pipeline.set_state(gstreamer::State::Ready);
+            // let _ = pipeline.state(ClockTime::from_seconds(3)).0;
+
+            //self.reset_all_element_base_times(&pipeline);
+
+            let _ = pipeline.set_state(gstreamer::State::Paused);
+            let _ = pipeline.state(ClockTime::from_seconds(3)).0;
+        }
+    }
+
+    pub fn break_clock(&self) {
+        let imp = self.imp();
+        for pipeline_weak in imp.pipelines.lock().unwrap().values() {
+            let video_pipeline = pipeline_weak.upgrade().unwrap();
+            let pipeline = video_pipeline.lock().unwrap().pipeline().unwrap();
+
+            pipeline.use_clock(Clock::NONE);
+        }
+    }
+
+
 }

@@ -41,6 +41,8 @@ fn build_ui(app: &Application) -> Builder {
     let test_button: Button = builder.object("test_button").expect("failed to get test button");
     let test_button2: Button = builder.object("test_button2").expect("failed to get test button2");
     let test_button3: Button = builder.object("test_button3").expect("failed to get test button3");
+    let test_button4: Button = builder.object("test_button4").expect("failed to get test button4");
+    let test_button5: Button = builder.object("test_button5").expect("failed to get test button5");
     
     video_container.set_homogeneous(true);
     video_container.set_valign(gtk::Align::Fill);
@@ -126,6 +128,7 @@ fn build_ui(app: &Application) -> Builder {
     let color_picker_clone = color_picker.clone();
     // Adds new video player and new columns to split table
     let split_table_clone = split_table.clone();
+    let sync_manager_clone = sync_manager.clone();
     new_video_player_button.connect_clicked(move |_| {
         let count = *unsafe{ get_data::<usize>(&video_container_clone, "count").unwrap().as_ref() };
         if count as u32 == MAX_VIDEO_PLAYERS {
@@ -181,7 +184,7 @@ fn build_ui(app: &Application) -> Builder {
         ));
 
         new_player.connect_local("pipeline-built", false, glib::clone!(
-            #[strong(rename_to = sync_man)] sync_manager,
+            #[strong(rename_to = sync_man)] sync_manager_clone,
             #[strong(rename_to = pipeline_id)] video_player_id,
             #[strong(rename_to = video_player)] new_player,
             move |_| {
@@ -193,7 +196,7 @@ fn build_ui(app: &Application) -> Builder {
         ));
 
         new_player.connect_local("remove-video-player", false, glib::clone!(
-            #[strong(rename_to = sync_man)] sync_manager,
+            #[strong(rename_to = sync_man)] sync_manager_clone,
             #[strong(rename_to = pipeline_id)] video_player_id,
             #[strong(rename_to = video_player)] new_player,
             #[strong(rename_to = video_player_container)] video_container_clone,
@@ -341,6 +344,18 @@ fn build_ui(app: &Application) -> Builder {
     test_button3.connect_clicked(move |_| {
         shared_seek_bar_clone.toggle_has_control();
     });
+
+    let sync_manager_clone = sync_manager.clone();
+    test_button4.connect_clicked(move |_| {
+        sync_manager_clone.break_clock();
+    });
+
+    let sync_manager_clone = sync_manager.clone();
+    test_button5.connect_clicked(move |_| {
+        sync_manager_clone.fix_clock();
+    });
+
+
 
     app.add_window(&window);
     window.show();

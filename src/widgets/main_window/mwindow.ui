@@ -64,6 +64,21 @@
                                         <property name="vexpand">false</property>
                                         <property name="orientation">vertical</property>
                                         <child>
+                                            <object class="GtkButton" id="test_button5">
+                                                <property name="hexpand">false</property>
+                                                <property name="halign">fill</property>
+                                                <property name="label">Fix Clock</property>
+                                            </object>
+                                        </child>
+                                        
+                                        <child>
+                                            <object class="GtkButton" id="test_button4">
+                                                <property name="hexpand">false</property>
+                                                <property name="halign">fill</property>
+                                                <property name="label">Break Clock</property>
+                                            </object>
+                                        </child>
+                                        <child>
                                             <object class="GtkButton" id="test_button3">
                                                 <property name="hexpand">false</property>
                                                 <property name="halign">fill</property>

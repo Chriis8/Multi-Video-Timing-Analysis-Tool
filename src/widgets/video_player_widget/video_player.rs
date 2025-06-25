@@ -78,9 +78,6 @@ mod imp {
         pub play_button: TemplateChild<Button>,
         
         #[template_child]
-        pub stop_button: TemplateChild<Button>,
-        
-        #[template_child]
         pub next_frame_button: TemplateChild<Button>,
         
         #[template_child]
@@ -91,6 +88,9 @@ mod imp {
 
         #[template_child]
         pub remove_video_player_button: TemplateChild<Button>,
+
+        #[template_child]
+        pub toggle_mute_button: TemplateChild<Button>,
     }
     
     #[gtk::glib::object_subclass]
@@ -121,7 +121,6 @@ mod imp {
             self.next_frame_button.set_sensitive(status);
             self.previous_frame_button.set_sensitive(status);
             self.play_button.set_sensitive(status);
-            self.stop_button.set_sensitive(status);
             self.set_start_time_button.set_sensitive(status);
             self.split_button.set_sensitive(status);
         }
@@ -235,7 +234,6 @@ impl VideoPlayer {
             if let Some(gstman) = gstman_weak.upgrade() {
                 if let Ok(pipeline) = gstman.lock() {
                     if let Ok(new_value) = pipeline.position_to_percent() {
-                        println!("new scale value: {new_value}");
                         seek_bar_clone.set_value(new_value);
                     }
                 }
@@ -449,25 +447,6 @@ impl VideoPlayer {
         ));
         
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
-        // Closes video file
-        imp.stop_button.connect_clicked(glib::clone!(
-            #[strong] gstman_weak,
-            #[weak(rename_to = timeout_id)] imp.timeout_id,
-            move |_| {
-                if let Some(id) = timeout_id.borrow_mut().take() {
-                    id.remove();
-                }     
-                if let Some(gstman) = gstman_weak.upgrade() {
-                    if let Ok(pipeline) = gstman.lock() {
-                        pipeline.stop_video();
-                    } else {
-                        eprintln!("Failed to aquire lock on Video pipeline");
-                    }
-                }
-            }
-        ));
-        
-        let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
         // Moves video one frame forward
         imp.next_frame_button.connect_clicked(glib::clone!(
             #[strong] gstman_weak,
@@ -534,6 +513,22 @@ impl VideoPlayer {
             }
         ));
 
+        let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        imp.toggle_mute_button.connect_clicked(glib::clone!(
+            #[strong] gstman_weak,
+            move |_| {
+                let gstman = match gstman_weak.upgrade() {
+                    Some(val) => val,
+                    None => return,
+                };
+                let video_pipeline = match gstman.lock() {
+                    Ok(val) => val,
+                    Err(_) => return,
+                };
+                video_pipeline.toggle_mute();
+            }
+        ));
+
         Self::connect_scale_drag_signals(self,&imp.seek_bar);
         Self::load_css();
     }
@@ -560,7 +555,6 @@ impl VideoPlayer {
         imp.next_frame_button.set_sensitive(status);
         imp.previous_frame_button.set_sensitive(status);
         imp.play_button.set_sensitive(status);
-        imp.stop_button.set_sensitive(status);
         imp.set_start_time_button.set_sensitive(status);
         imp.split_button.set_sensitive(status);
     }

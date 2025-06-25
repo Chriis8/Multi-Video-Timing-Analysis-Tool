@@ -77,12 +77,6 @@
                         </child>
 
                         <child>
-                            <object class="GtkButton" id="stop_button">
-                                <property name="label">Stop</property>
-                            </object>
-                        </child>
-
-                        <child>
                             <object class="GtkButton" id="next_frame_button">
                                 <property name="label">Next Frame</property>
                             </object>
@@ -101,10 +95,17 @@
                         </child>
 
                         <child>
+                            <object class="GtkButton" id="toggle_mute_button">
+                                <property name="label">Mute/Unmute</property>
+                            </object>
+                        </child>
+
+                        <child>
                             <object class="GtkButton" id="remove_video_player_button">
                                 <property name="label">Remove Video Player</property>
                             </object>
                         </child>
+
                     </object>
                 </child>
             </object>

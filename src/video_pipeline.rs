@@ -1,4 +1,4 @@
-use std::{cell::RefCell, iter::Once, thread::{self, current}, time::Duration};
+use std::{cell::{RefCell, Cell}, iter::Once, thread::{self, current}, time::Duration};
 use glib::BoolError;
 use gstreamer::{event::{Seek, Step}, prelude::*, Clock, ClockTime, Element, Pipeline, SeekFlags, SeekType };
 use gtk::{self, Ordering};
@@ -16,11 +16,38 @@ pub enum PlaybackDirection {
 pub struct PipelineState {
     pub direction: PlaybackDirection,
 }
+pub struct VolumeControl {
+    volume_element: Element,
+    volume: Cell<f64>,
+    is_muted: Cell<bool>,
+}
+
+impl VolumeControl {
+    pub fn mute_audio(&self) {
+        if self.is_muted.get() {
+            return;
+        }
+        println!("Muting audio");
+        self.volume_element.set_property("volume", 0.0);
+        self.is_muted.set(true);
+    }
+
+    pub fn unmute_audio(&self) {
+        if !self.is_muted.get() {
+            return;
+        }
+        let previous_volume = self.volume.get();
+        println!("Unmuting audio: volume: {previous_volume}");
+        self.volume_element.set_property("volume", previous_volume);
+        self.is_muted.set(false);
+    }
+}
 
 pub struct VideoClamp {
     start_time: ClockTime,
     end_time: ClockTime,
 }
+
 
 impl VideoClamp {
     pub fn new(start: ClockTime, end: ClockTime) -> Self {
@@ -72,6 +99,7 @@ pub struct VideoPipeline {
     clamp: Arc<Mutex<Option<VideoClamp>>>,
     monitor_thread: Option<thread::JoinHandle<()>>,
     monitor_active: Arc<AtomicBool>,
+    volume_control: Arc<Mutex<Option<VolumeControl>>>,
 }
 
 
@@ -86,6 +114,7 @@ impl VideoPipeline {
             clamp: Arc::new(Mutex::new(None)),
             monitor_thread: None,
             monitor_active: Arc::new(AtomicBool::new(false)),
+            volume_control: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -173,8 +202,6 @@ impl VideoPipeline {
         let position_ns = position.nseconds();
         let duration_ns = total_duration.nseconds();
 
-        println!("position_to_percent: position: {position_ns}, duration: {duration_ns}");
-
         let percent = position_ns as f64 / duration_ns as f64 * 100.0;
         
         Ok(percent)
@@ -244,6 +271,10 @@ impl VideoPipeline {
             .name("audio_convert")
             .build()
             .expect("Failed to build audioconvert element");
+        let volume = gstreamer::ElementFactory::make("volume")
+            .name("volume")
+            .build()
+            .expect("Failed to build volume element");
         let audio_resample = gstreamer::ElementFactory::make("audioresample")
             .name("audio_resample")
             .build()
@@ -267,8 +298,8 @@ impl VideoPipeline {
 
 
         // Connects elements in pipeline
-        self.pipeline.add_many([&source, &audio_convert, &audio_resample, &audio_sink, &video_convert, &video_rate, &video_scale, &self.gtksink]).unwrap();
-        gstreamer::Element::link_many([&audio_convert, &audio_resample, &audio_sink])
+        self.pipeline.add_many([&source, &audio_convert, &volume, &audio_resample, &audio_sink, &video_convert, &video_rate, &video_scale, &self.gtksink]).unwrap();
+        gstreamer::Element::link_many([&audio_convert, &volume, &audio_resample, &audio_sink])
             .expect("Failed to link audio elements");
         gstreamer::Element::link_many([&video_convert, &video_rate, &video_scale, &self.gtksink])
             .expect("Failed to link video elements");
@@ -329,7 +360,13 @@ impl VideoPipeline {
                 }
             }
         });
+
         println!("pipeline built");
+        *self.volume_control.lock().unwrap() = Some(VolumeControl {
+            volume_element: volume.clone(),
+            volume: Cell::new(1.0),
+            is_muted: Cell::new(false),
+        });
         self.pipeline
             .set_state(gstreamer::State::Paused)
             .expect("Failed to set pipeline state to paused");
@@ -337,30 +374,6 @@ impl VideoPipeline {
         let _ = self.pipeline.state(ClockTime::from_seconds(2));
 
         self.set_frame_duration();
-        // let mut attempts = 0;
-        // const MAX_ATTEMPTS: u8 = 25;
-        // let mut duration_opt: Option<ClockTime> = None;
-        // loop {
-        //     if let Some(pos) = self.pipeline.query_duration::<ClockTime>() {
-        //         duration_opt = Some(pos);
-        //         break;
-        //     } else {
-        //         attempts += 1;
-        //         println!("attempts at getting duration after setting up pipeline: {attempts}");
-        //         if attempts >= MAX_ATTEMPTS {
-        //             break;
-        //         }
-        //     }
-        //     std::thread::sleep(Duration::from_millis(50));
-        // }
-        // let duration = match duration_opt {
-        //     Some(duration) => duration,
-        //     None => {
-        //         eprintln!("Failed to get pipeline position");
-        //         ClockTime::ZERO
-        //     }
-        // };
-
     }
 
     // Returns paintable object for gtk widget
@@ -377,26 +390,6 @@ impl VideoPipeline {
     pub fn get_bus(&self) -> Option<gstreamer::Bus> {
         self.pipeline.bus()
     }
-
-    // Sets the video to the playing state
-    // pub fn play_videox(&self) {
-    //     let (_,current_state,_) = self.pipeline.state(gstreamer::ClockTime::NONE);
-    //     let new_state = match current_state {
-    //         gstreamer::State::Null => return,
-    //         gstreamer::State::Playing => gstreamer::State::Paused,
-    //         _ => gstreamer::State::Playing,
-    //     };
-
-    //     let length = self.pipeline.query_duration::<ClockTime>().unwrap();
-    //     let mut state = self.state.borrow_mut();
-    //     if new_state == gstreamer::State::Playing && state.direction == PlaybackDirection::Reverse {
-    //         self.set_rate(1., ClockTime::ZERO, length);
-    //         state.direction = PlaybackDirection::Forward;
-    //     }
-
-    //     println!("new state: {:?}", new_state);
-    //     self.pipeline.set_state(new_state).expect("Failed to set state");
-    // }
 
     pub fn play_video(&self) {
         let state = self.state.borrow();
@@ -430,19 +423,8 @@ impl VideoPipeline {
             }
         };
         let mut state = self.state.borrow_mut();
-        //let end_time = state.end.unwrap_or(self.pipeline.query_duration::<ClockTime>().and_then(|clock_time| Some(clock_time.nseconds())).unwrap());
-        //let end_time = state.end;
         state.direction = PlaybackDirection::Forward;
         drop(state);
-        // let seek_event =
-        //     Seek::new(
-        //         1.0,
-        //         SeekFlags::FLUSH | SeekFlags::ACCURATE,
-        //         SeekType::Set,
-        //         position,
-        //         SeekType::Set,
-        //         ClockTime::from_nseconds(end_time),
-        //     );
         let seek_event =
             Seek::new(
                 1.0,
@@ -464,18 +446,8 @@ impl VideoPipeline {
             }
         };
         let mut state = self.state.borrow_mut();
-        //let start_time = state.start;
         state.direction = PlaybackDirection::Reverse;
         drop(state);
-        // let seek_event =
-        //     Seek::new(
-        //         -1.0,
-        //         SeekFlags::FLUSH | SeekFlags::ACCURATE,
-        //         SeekType::Set,
-        //         ClockTime::from_nseconds(start_time),
-        //         SeekType::Set,
-        //         position,
-        //     );
         let seek_event =
             Seek::new(
                 -1.0,
@@ -843,6 +815,19 @@ impl VideoPipeline {
 
         if let Some(handle) = self.monitor_thread.take() {
             let _ = handle.join();
+        }
+    }
+
+    pub fn toggle_mute(&self) {
+        let guard = self.volume_control.lock().unwrap();
+        let volume_control = match guard.as_ref() {
+            Some(vc) => vc,
+            None => return,
+        };
+        if volume_control.is_muted.get() {
+            volume_control.unmute_audio();
+        } else {
+            volume_control.mute_audio();
         }
     }
 

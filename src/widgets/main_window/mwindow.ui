@@ -63,42 +63,12 @@
                                         <property name="valign">end</property>
                                         <property name="vexpand">false</property>
                                         <property name="orientation">vertical</property>
-                                        <child>
-                                            <object class="GtkButton" id="test_button5">
-                                                <property name="hexpand">false</property>
-                                                <property name="halign">fill</property>
-                                                <property name="label">Fix Clock</property>
-                                            </object>
-                                        </child>
                                         
                                         <child>
-                                            <object class="GtkButton" id="test_button4">
-                                                <property name="hexpand">false</property>
-                                                <property name="halign">fill</property>
-                                                <property name="label">Break Clock</property>
-                                            </object>
-                                        </child>
-                                        <child>
-                                            <object class="GtkButton" id="test_button3">
+                                            <object class="GtkButton" id="toggle_shared_video_play">
                                                 <property name="hexpand">false</property>
                                                 <property name="halign">fill</property>
                                                 <property name="label">Toggle Control</property>
-                                            </object>
-                                        </child>
-                                        
-                                        <child>
-                                            <object class="GtkButton" id="test_button2">
-                                                <property name="hexpand">false</property>
-                                                <property name="halign">fill</property>
-                                                <property name="label">Set pos to 0</property>
-                                            </object>
-                                        </child>
-                                        
-                                        <child>
-                                            <object class="GtkButton" id="test_button">
-                                                <property name="hexpand">false</property>
-                                                <property name="halign">fill</property>
-                                                <property name="label">fetch positions</property>
                                             </object>
                                         </child>
 

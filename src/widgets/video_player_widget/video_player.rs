@@ -59,9 +59,6 @@ mod imp {
         #[template_child]
         pub picture: TemplateChild<Picture>,
 
-        // #[template_child]
-        // pub scale_parent: TemplateChild<Box>,
-
         #[template_child]
         pub seek_bar: TemplateChild<SeekBar>,
 
@@ -109,6 +106,7 @@ mod imp {
     }
 
     impl VideoPlayer {
+        //Sets up seek bar widget
         fn setup_seek_bar(&self) {
             println!("Setting up seek bar!");
 
@@ -117,6 +115,7 @@ mod imp {
             scale.set_adjustment(&adjustment);
         }
 
+        //Enable/Disables video player user controls
         fn set_controls(&self, status: bool) {
             self.next_frame_button.set_sensitive(status);
             self.previous_frame_button.set_sensitive(status);
@@ -125,14 +124,19 @@ mod imp {
             self.split_button.set_sensitive(status);
         }
 
+        //Enable/Disables video players scale controls
         fn set_scale_interation(&self, status: bool) {
             self.seek_bar.set_sensitive(status);
         }
+        
+        //Clean up video player before disposal
         pub fn cleanup(&self) {
             println!("cleaning up Video Player");
+            //Removes scale updating timeout 
             if let Some(timeout) = self.timeout_id.borrow_mut().take() {
                 timeout.remove();
             }
+            //disposes of the associated pipeline
             if let Ok(mut pipeline) = self.gstreamer_manager.lock() {
                 println!("pipeline cleanup");
                 pipeline.cleanup();
@@ -147,6 +151,7 @@ mod imp {
             println!("disposing Video Player");
         }
 
+        //Sets up initial state of the video player
         fn constructed(&self) {
             self.setup_seek_bar();
             self.set_controls(false);
@@ -290,6 +295,7 @@ impl VideoPlayer {
         scale_box.add_controller(gesture);
     }
 
+    //Dynamically load css for video player
     fn load_css() {
         let provider = CssProvider::new();
         match std::env::current_dir() {
@@ -324,8 +330,8 @@ impl VideoPlayer {
                 this.set_scale_interation(false);
                 let videos_filter = gtk::FileFilter::new();
                 videos_filter.set_name(Some("Video Files"));
-                videos_filter.add_pattern("*.mp4");   // MP4 format
-                // Add additional video formats here
+                // Video formats allowed
+                videos_filter.add_pattern("*.mp4");
 
                 let dialog = gtk::FileChooserDialog::builder()
                     .title("Open File")
@@ -335,6 +341,8 @@ impl VideoPlayer {
                     .build();
                 dialog.add_button("Cancel", gtk::ResponseType::Cancel);
                 dialog.add_button("Accept", gtk::ResponseType::Accept);
+                
+                //Keeps new dialog box on top of main window
                 if let Some(window) = win.downcast::<gtk::ApplicationWindow>().ok() {
                     dialog.set_transient_for(Some(&window));
                 }
@@ -351,17 +359,27 @@ impl VideoPlayer {
                                 println!("File accepted: {}", from_str);
                                 if let Some(gstman) = gstman_weak_clone.upgrade() {
                                     if let Ok(mut pipeline) = gstman.lock() {
+                                        //Builds pipeline from selected file
                                         pipeline.reset();
                                         pipeline.build_pipeline(Some(&text.label().to_string()));
+
+                                        //Sets gstreamers paintable element to picture widget
                                         let paintable = pipeline.get_paintable();
                                         pic.set_paintable(Some(&paintable));
+
+                                        //Sets up initial seek bar state
                                         let scale = seekbar.get_scale();
                                         this.start_updating_scale(&scale);
                                         let timeline_length = pipeline.get_length().unwrap();
                                         seekbar.set_timeline_length(timeline_length);
                                         let nanos: &dyn ToValue = &timeline_length;
+                                        
+                                        //Reset pipeline clamp
                                         pipeline.reset_clamps();
+                                        
                                         this.emit_by_name::<()>("timeline-length-acquired", &[nanos]);
+                                        
+                                        //Enable user control
                                         this.set_controls(true);
                                         this.set_scale_interation(true);
                                     } else {
@@ -403,26 +421,26 @@ impl VideoPlayer {
         ));
         
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
-        // Set video to playing state
+        // Play/Pause video
         imp.play_button.connect_clicked(glib::clone!(
             #[strong] gstman_weak,
             #[weak(rename_to = last_click)] imp.last_click,
             #[strong(rename_to = debounce_duration)] imp.debouce_duration,
             #[weak(rename_to = state)] imp.state,
             move |_| {
+                //Button Debounce
                 let now = Instant::now();
                 let mut last_click = last_click.borrow_mut();
-
                 if let Some(last_time) = *last_click {
                     if now.duration_since(last_time) < *debounce_duration.borrow() {
                         println!("Debouncing video player play button");
                         return;
                     }
                 }
-
                 *last_click = Some(now);
                 drop(last_click);
 
+                //toggle between play and pause state
                 let mut state = state.borrow_mut();
                 if state.unwrap() == gstreamer::State::Playing {
                     if let Some(gstman) = gstman_weak.upgrade() {
@@ -475,6 +493,7 @@ impl VideoPlayer {
                     Ok(val) => val, Err(_) => return,
                 };
                 
+                //Gets current position of video
                 let pos = match pipeline.get_position() {
                     Some(time) => time,
                     None => {
@@ -482,12 +501,15 @@ impl VideoPlayer {
                         return;
                     }
                 };
+
+                //Emits position on signal for split table to handle
                 let nanos: &dyn ToValue = &pos.nseconds();
                 let id: &dyn ToValue = &imp.id.borrow().to_value();
                 this.emit_by_name::<()>("split_button_clicked", &[id, nanos]);
             }
         ));
 
+        //Sets the start time offset of the video based on current position of video
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
         imp.set_start_time_button.connect_clicked(glib::clone!(
             #[strong] gstman_weak,
@@ -500,6 +522,8 @@ impl VideoPlayer {
                 let pipeline = match gstman.lock() {
                     Ok(val) => val, Err(_) => return,
                 };
+
+                //Gets the current position of the video
                 let pos = match pipeline.get_position() {
                     Some(time) => time,
                     None => {
@@ -507,12 +531,15 @@ impl VideoPlayer {
                         return;
                     }
                 };
+
+                //Emit position on signal for split table to handle
                 let nanos: &dyn ToValue = &pos.nseconds();
                 let id: &dyn ToValue = &imp.id.borrow().to_value();
                 this.emit_by_name::<()>("set-start-button-clicked", &[id, nanos]);
             }
         ));
 
+        //Toggle audio mute
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
         imp.toggle_mute_button.connect_clicked(glib::clone!(
             #[strong] gstman_weak,
@@ -528,16 +555,10 @@ impl VideoPlayer {
                 video_pipeline.toggle_mute();
             }
         ));
-
+        
         Self::connect_scale_drag_signals(self,&imp.seek_bar);
         Self::load_css();
     }
-
-    // // Gets split button - idk if this is used
-    // pub fn split_button(&self) -> gtk::Button {
-    //     let imp = imp::VideoPlayer::from_obj(self);
-    //     imp.split_button.clone()
-    // }
 
     // Gets the video players pipeline
     pub fn pipeline(&self) -> Weak<Mutex<VideoPipeline>> {
@@ -545,11 +566,13 @@ impl VideoPlayer {
         Arc::downgrade(&imp.gstreamer_manager)
     }
 
+    //Connect a split table entry to video player
     pub fn connect_time_to_seekbar(&self, id: String, time_entry: TimeEntry, color: &str) {
         let imp = imp::VideoPlayer::from_obj(self);
         imp.seek_bar.add_mark(id, time_entry, color, TimeEntry::new(0));
     }
 
+    //Enable/Disable video player user controls
     pub fn set_controls(&self, status: bool) {
         let imp = self.imp();
         imp.next_frame_button.set_sensitive(status);
@@ -559,32 +582,38 @@ impl VideoPlayer {
         imp.split_button.set_sensitive(status);
     }
 
+    //Enable/Disable video player scale interaction
     pub fn set_scale_interation(&self, status: bool) {
         let imp = self.imp();
         imp.seek_bar.set_sensitive(status);
     }
 
+    //Gets the seek bar with mark widget
     pub fn get_seek_bar(&self) -> Option<SeekBar> {
         let imp = self.imp();
         let sb = imp.seek_bar.get();
         return Some(sb);
     }
 
+    //Get id of the video player
     pub fn get_id(&self) -> String {
         let imp = self.imp();
         imp.id.borrow().to_string()
     }
 
+    //Sets the color of the video player's marks
     pub fn set_color(&self, color: &str) {
         let imp = self.imp();
         *imp.color.borrow_mut() = color.to_string();
     }
 
+    //Gets the color of the video player's marks
     pub fn get_color(&self) -> String {
         let imp = self.imp();
         imp.color.borrow().to_string()
     }
 
+    //Cleans up the video player before disposal
     pub fn cleanup(&self) {
         let imp = self.imp();
         imp.cleanup();

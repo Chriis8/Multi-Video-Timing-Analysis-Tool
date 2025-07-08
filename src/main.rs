@@ -36,13 +36,7 @@ fn build_ui(app: &Application) -> Builder {
     let add_row_below_button: Button = builder.object("add_row_below_button").expect("Failed to get add_row_below_button from UI File");
     let bottom_vbox: Box = builder.object("bottom_vbox").expect("Failed to get bottom_vbox from UI File");
     let start_time_offset_container: Box = builder.object("start_time_offset_container").expect("Failed to get start_time_offset_container from UI File");
-    
-    //Testing Stuff
-    let test_button: Button = builder.object("test_button").expect("failed to get test button");
-    let test_button2: Button = builder.object("test_button2").expect("failed to get test button2");
-    let test_button3: Button = builder.object("test_button3").expect("failed to get test button3");
-    let test_button4: Button = builder.object("test_button4").expect("failed to get test button4");
-    let test_button5: Button = builder.object("test_button5").expect("failed to get test button5");
+    let toggle_shared_video_play: Button = builder.object("toggle_shared_video_play").expect("failed to get test button3");
     
     video_container.set_homogeneous(true);
     video_container.set_valign(gtk::Align::Fill);
@@ -259,103 +253,10 @@ fn build_ui(app: &Application) -> Builder {
         shared_seek_bar_clone.connect_column(video_player_id.as_str(), color.as_str());
     });
 
-    let video_container_clone = video_container.clone();
-    test_button.connect_clicked(move |_| {
-        for (video_player_index, child) in flowbox_children(&video_container_clone).enumerate() {
-            let fb_child = match child.downcast_ref::<FlowBoxChild>() {
-                Some(c) => c,
-                None => continue,
-            };
-
-            let content = match fb_child.child() {
-                Some(c) => c,
-                None => continue,
-            };
-
-            let video_player = match content.downcast_ref::<VideoPlayer>() {
-                Some(vp) => vp,
-                None => continue,
-            };
-
-            let arc = match video_player.pipeline().upgrade() {
-                Some(a) => a,
-                None => {
-                    eprintln!("Shared jump to segment: Pipeline dropped");
-                    continue
-                }
-            };
-
-            let pipeline = match arc.lock() {
-                Ok(g) => g,
-                Err(_) => {
-                    eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
-                    continue
-                }
-            };
-            let time = pipeline.get_position().unwrap();
-            println!("Player {video_player_index} at position: {time}");
-        }
-    });
-
-    let split_table_clone = split_table.clone();
-    let video_container_clone = video_container.clone();
-    test_button2.connect_clicked(move |_| {
-        let offset_liststore = split_table_clone.get_start_time_offset_liststore().unwrap();
-        for (video_player_index, child) in flowbox_children(&video_container_clone).enumerate() {
-            let fb_child = match child.downcast_ref::<FlowBoxChild>() {
-                Some(c) => c,
-                None => continue,
-            };
-
-            let content = match fb_child.child() {
-                Some(c) => c,
-                None => continue,
-            };
-
-            let video_player = match content.downcast_ref::<VideoPlayer>() {
-                Some(vp) => vp,
-                None => continue,
-            };
-
-            let arc = match video_player.pipeline().upgrade() {
-                Some(a) => a,
-                None => {
-                    eprintln!("Shared jump to segment: Pipeline dropped");
-                    continue
-                }
-            };
-
-            let pipeline = match arc.lock() {
-                Ok(g) => g,
-                Err(_) => {
-                    eprintln!("Shared jump to segment: Failed to lock pipeline mutex");
-                    continue
-                }
-            };
-            let offset = offset_liststore.item(video_player_index as u32).and_downcast::<TimeEntry>().unwrap();
-            let start_time = gstreamer::ClockTime::from_nseconds(offset.get_time());
-            if let Err(e) = pipeline.seek_position(start_time) {
-                eprintln!("Player {video_player_index} error setting position: {e}");
-            }
-        }
-    });
-
     let shared_seek_bar_clone = ssb.clone();
-    test_button3.connect_clicked(move |_| {
+    toggle_shared_video_play.connect_clicked(move |_| {
         shared_seek_bar_clone.toggle_has_control();
     });
-
-    let sync_manager_clone = sync_manager.clone();
-    test_button4.connect_clicked(move |_| {
-        sync_manager_clone.break_clock();
-    });
-
-    let sync_manager_clone = sync_manager.clone();
-    test_button5.connect_clicked(move |_| {
-        sync_manager_clone.fix_clock();
-    });
-
-
 
     app.add_window(&window);
     window.show();

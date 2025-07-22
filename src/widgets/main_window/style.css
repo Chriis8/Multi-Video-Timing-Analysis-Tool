@@ -1,5 +1,5 @@
 .container {
-    background-color: black;
+    background-color: rgb(44, 44, 44);
 }
 
 .main-box {
@@ -7,28 +7,48 @@
 }
 
 .video-container {
-    background-color:crimson;
+    background-color: rgb(44, 44, 44);
+    border-color: rgb(62, 62, 62);
+    border-radius: 0px;
+    border-width: 2px;
+    border-style: solid;
     padding: 0;
     margin: 0;
 }
 
-.flow {
-    background-color: coral;
+/* .flow {
+    background-color: rgb(44, 44, 44);
+    border-color: rgb(62, 62, 62);
+    border-radius: 0px;
+    border-width: 2px;
+    border-style: solid;
     padding: 0px;
     margin: 0px;
-}
+} */
 
 .split-container {
-    background-color: yellow;
+    background-color: rgb(44, 44, 44);
     padding: 1px;
 }
 
-/* .bottom-container {
-    background: rgb(77, 178, 211);
-} */
+.side-table-container {
+    background-color: rgb(44, 44, 44);
+    border-color: rgb(62, 62, 62);
+    border-radius: 0px;
+    border-width: 2px;
+    border-style: solid;
+}
+
+.bottom-container {
+    background-color: rgb(44, 44, 44);
+    border-color: rgb(62, 62, 62);
+    border-radius: 0px;
+    border-width: 2px;
+    border-style: solid;
+}
 
 .new-video-player-button {
-    background-color: chartreuse;
+    background-color: rgb(44, 44, 44);
     border-radius: 0px;
     border: none;
     padding: 0px;
@@ -36,15 +56,15 @@
 }
 
 .shared-seek-bar-container {
-    background-color: rgb(117, 186, 118);
+    background-color: rgb(44, 44, 44);
 }
 
 .shared-seek-bar-button-container {
-    background-color: rgb(255, 255, 255);
+    background-color: rgb(44, 44, 44);
 }
 
 .bottom-vbox {
-    background-color: rgb(255, 245, 160);
+    background-color: rgb(44, 44, 44);
 }
 
 .scale-slider-hidden scale slider {

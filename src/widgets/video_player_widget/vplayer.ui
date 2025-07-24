@@ -53,7 +53,7 @@
                     </object>
                 </child>
                 <child>
-                    <object class="GtkLabel" id="label">
+                    <object class="GtkLabel" id="video_position">
                         <property name="label">Position: 00:00:00</property>
                     </object>
                 </child>

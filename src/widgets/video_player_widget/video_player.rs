@@ -16,6 +16,8 @@ use once_cell::sync::Lazy;
 use crate::widgets::seek_bar::seek_bar::SeekBar;
 use glib::{WeakRef, clone::Downgrade, clone::Upgrade};
 use std::time::Instant;
+use gstreamer::ClockTime;
+use crate::helpers::format::format_clock;
 
 mod imp {
     use gtk::{Box, Button, Label, Picture};
@@ -63,7 +65,7 @@ mod imp {
         pub seek_bar: TemplateChild<SeekBar>,
 
         #[template_child]
-        pub label: TemplateChild<Label>,
+        pub video_position: TemplateChild<Label>,
 
         #[template_child]
         pub hbox: TemplateChild<Box>,
@@ -227,6 +229,7 @@ impl VideoPlayer {
         let imp = imp::VideoPlayer::from_obj(self);
         let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
         let seek_bar_clone = scale.clone();
+        let timestamp_label = imp.video_position.clone();
         let is_dragging_clone = imp.is_dragging.clone();
         // Sets up timeout to update the seekbar every 100 milliseconds
         let source_id = timeout_add_local(Duration::from_millis(100), move || {
@@ -240,6 +243,11 @@ impl VideoPlayer {
                 if let Ok(pipeline) = gstman.lock() {
                     if let Ok(new_value) = pipeline.position_to_percent() {
                         seek_bar_clone.set_value(new_value);
+                    }
+                    if let Some(position) = pipeline.get_position() {
+                        let nanos = position.nseconds();
+                        let formatted_time = format_clock(nanos);
+                        timestamp_label.set_label(&format!("Position: {formatted_time}"));
                     }
                 }
             }

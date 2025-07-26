@@ -20,11 +20,11 @@
                         <property name="margin-bottom">20</property>
                         <property name="margin-end">10</property>
                         <property name="margin-start">10</property>
-                        <child>
+                        <!-- <child>
                             <object class="GtkButton" id="fchooser">
                                 <property name="label">Open File</property>
                             </object>
-                        </child>
+                        </child> -->
                         
                         <child>
                             <object class="GtkLabel" id="text_view">

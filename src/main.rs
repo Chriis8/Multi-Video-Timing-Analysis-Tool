@@ -138,7 +138,7 @@ fn build_ui(app: &Application) -> Builder {
         let mut picker = color_picker_clone.borrow_mut();
         let color = picker.assign_color(video_player_id.as_str()).unwrap();
         new_player.set_color(color.as_str());
-        new_player.setup_event_handlers(window);
+        new_player.setup_event_handlers();
 
         split_table_clone.add_empty_column(video_player_id.as_str());
         
@@ -251,6 +251,8 @@ fn build_ui(app: &Application) -> Builder {
         
         split_table_clone.connect_column_to_seekbar(&video_container_clone, video_player_index);
         shared_seek_bar_clone.connect_column(video_player_id.as_str(), color.as_str());
+
+        new_player.load_file(window);
     });
 
     let shared_seek_bar_clone = ssb.clone();

@@ -53,9 +53,6 @@ mod imp {
         pub hboxtop: TemplateChild<Box>,
 
         #[template_child]
-        pub fchooser: TemplateChild<Button>,
-
-        #[template_child]
         pub text_view: TemplateChild<Label>,
 
         #[template_child]
@@ -320,91 +317,92 @@ impl VideoPlayer {
         }
     }
 
-    pub fn setup_event_handlers(&self, window: gtk::ApplicationWindow) {
+    pub fn load_file(&self, window: gtk::ApplicationWindow) {
+        let imp = self.imp();
+        let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
+        // File Chooser / Open file button
+        self.set_controls(false);
+        self.set_scale_interation(false);
+        let videos_filter = gtk::FileFilter::new();
+        videos_filter.set_name(Some("Video Files"));
+        // Video formats allowed
+        videos_filter.add_pattern("*.mp4");
+
+        let dialog = gtk::FileChooserDialog::builder()
+            .title("Open File")
+            .action(gtk::FileChooserAction::Open)
+            .modal(true)
+            .filter(&videos_filter)
+            .build();
+        dialog.add_button("Cancel", gtk::ResponseType::Cancel);
+        dialog.add_button("Accept", gtk::ResponseType::Accept);
+        
+        //Keeps new dialog box on top of main window
+        if let Some(window) = window.downcast::<gtk::ApplicationWindow>().ok() {
+            dialog.set_transient_for(Some(&window));
+        }
+
+        let gstman_weak_clone = gstman_weak.clone();
+        dialog.run_async(glib::clone!(
+            #[weak(rename_to = text)] imp.text_view,
+            #[weak(rename_to = pic)] imp.picture,
+            #[weak(rename_to = this)] self,
+            #[weak(rename_to = seekbar)] imp.seek_bar,
+            move |obj, res| {
+                match res {
+                    gtk::ResponseType::Accept => {
+                        println!("Accepted");
+                        if let Some(file) = obj.file() {
+                            let from_str = gtk::gio::File::uri(&file);
+                            println!("from_str {from_str}");
+                            text.set_label(&from_str);
+                            println!("File accepted: {}", from_str);
+                            if let Some(gstman) = gstman_weak_clone.upgrade() {
+                                if let Ok(mut pipeline) = gstman.lock() {
+                                    //Builds pipeline from selected file
+                                    pipeline.reset();
+                                    pipeline.build_pipeline(Some(&text.label().to_string()));
+
+                                    //Sets gstreamers paintable element to picture widget
+                                    let paintable = pipeline.get_paintable();
+                                    pic.set_paintable(Some(&paintable));
+
+                                    //Sets up initial seek bar state
+                                    let scale = seekbar.get_scale();
+                                    this.start_updating_scale(&scale);
+                                    let timeline_length = pipeline.get_length().unwrap();
+                                    seekbar.set_timeline_length(timeline_length);
+                                    let nanos: &dyn ToValue = &timeline_length;
+                                    
+                                    //Reset pipeline clamp
+                                    pipeline.reset_clamps();
+                                    
+                                    this.emit_by_name::<()>("timeline-length-acquired", &[nanos]);
+                                    
+                                    //Enable user control
+                                    this.set_controls(true);
+                                    this.set_scale_interation(true);
+                                } else {
+                                    eprintln!("Failed to aquire lock on Video pipeline");
+                                }
+                                this.emit_by_name::<()>("pipeline-built", &[]);
+                            }
+                        }
+                    }
+                    _ => {
+                        eprintln!("No file selected removing video player");
+                        this.emit_by_name::<()>("remove-video-player", &[]);
+                    }
+                }
+                obj.destroy();
+            }
+        ));
+    }
+
+    pub fn setup_event_handlers(&self) {
         let imp = imp::VideoPlayer::from_obj(self);
 
         println!("Setting up buttons");
-        let gstman_weak = Arc::downgrade(&imp.gstreamer_manager);
-        // File Chooser / Open file button
-        imp.fchooser.connect_clicked(glib::clone!(
-            #[strong] gstman_weak,
-            #[weak(rename_to = text)] imp.text_view,
-            #[weak(rename_to = pic)] imp.picture,
-            #[weak(rename_to = win)] window,
-            #[weak(rename_to = this)] self,
-            #[weak(rename_to = seekbar)] imp.seek_bar,
-            move |_| {
-                this.set_controls(false);
-                this.set_scale_interation(false);
-                let videos_filter = gtk::FileFilter::new();
-                videos_filter.set_name(Some("Video Files"));
-                // Video formats allowed
-                videos_filter.add_pattern("*.mp4");
-
-                let dialog = gtk::FileChooserDialog::builder()
-                    .title("Open File")
-                    .action(gtk::FileChooserAction::Open)
-                    .modal(true)
-                    .filter(&videos_filter)
-                    .build();
-                dialog.add_button("Cancel", gtk::ResponseType::Cancel);
-                dialog.add_button("Accept", gtk::ResponseType::Accept);
-                
-                //Keeps new dialog box on top of main window
-                if let Some(window) = win.downcast::<gtk::ApplicationWindow>().ok() {
-                    dialog.set_transient_for(Some(&window));
-                }
-
-                let gstman_weak_clone = gstman_weak.clone();
-                dialog.run_async(move |obj, res| {
-                    match res {
-                        gtk::ResponseType::Accept => {
-                            println!("Accepted");
-                            if let Some(file) = obj.file() {
-                                let from_str = gtk::gio::File::uri(&file);
-                                println!("from_str {from_str}");
-                                text.set_label(&from_str);
-                                println!("File accepted: {}", from_str);
-                                if let Some(gstman) = gstman_weak_clone.upgrade() {
-                                    if let Ok(mut pipeline) = gstman.lock() {
-                                        //Builds pipeline from selected file
-                                        pipeline.reset();
-                                        pipeline.build_pipeline(Some(&text.label().to_string()));
-
-                                        //Sets gstreamers paintable element to picture widget
-                                        let paintable = pipeline.get_paintable();
-                                        pic.set_paintable(Some(&paintable));
-
-                                        //Sets up initial seek bar state
-                                        let scale = seekbar.get_scale();
-                                        this.start_updating_scale(&scale);
-                                        let timeline_length = pipeline.get_length().unwrap();
-                                        seekbar.set_timeline_length(timeline_length);
-                                        let nanos: &dyn ToValue = &timeline_length;
-                                        
-                                        //Reset pipeline clamp
-                                        pipeline.reset_clamps();
-                                        
-                                        this.emit_by_name::<()>("timeline-length-acquired", &[nanos]);
-                                        
-                                        //Enable user control
-                                        this.set_controls(true);
-                                        this.set_scale_interation(true);
-                                    } else {
-                                        eprintln!("Failed to aquire lock on Video pipeline");
-                                    }
-                                    this.emit_by_name::<()>("pipeline-built", &[]);
-                                }
-                            }
-                        }
-                        _ => {
-                            eprintln!("No file selected");
-                        }
-                    }
-                    obj.destroy();
-                });
-            }
-        ));
 
         imp.remove_video_player_button.connect_clicked(glib::clone!(
             #[weak(rename_to = this)] self,

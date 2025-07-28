@@ -17,3 +17,15 @@
     border-width: 1px;
     border-style: solid;
 }
+
+.video-player-control-button {
+    padding-left: 5px;
+    padding-right: 5px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+}
+
+.video-player-control-button label {
+    padding: 0px;
+    margin: 0px;
+}

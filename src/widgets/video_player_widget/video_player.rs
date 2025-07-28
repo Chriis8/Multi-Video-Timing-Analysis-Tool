@@ -564,6 +564,13 @@ impl VideoPlayer {
         
         Self::connect_scale_drag_signals(self,&imp.seek_bar);
         Self::load_css();
+        // imp.remove_video_player_button.add_css_class("data-table");
+        // imp.previous_frame_button.add_css_class("data-table");
+        // imp.play_button.add_css_class("data-table");
+        // imp.next_frame_button.add_css_class("data-table");
+        // imp.split_button.add_css_class("data-table");
+        // imp.set_start_time_button.add_css_class("data-table");
+        // imp.toggle_mute_button.add_css_class("data-table");
     }
 
     // Gets the video players pipeline

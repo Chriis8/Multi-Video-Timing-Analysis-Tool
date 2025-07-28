@@ -9,8 +9,6 @@
             <object class="GtkBox" id="vbox">
                 <style><class name="v-box"></class></style>
                 <property name="orientation">vertical</property>
-                <property name="height-request">400</property>
-                <property name="width-request">300</property>
                 <child>
                     <object class="GtkBox" id="hboxtop">
                         <property name="spacing">10</property>
@@ -20,11 +18,6 @@
                         <property name="margin-bottom">20</property>
                         <property name="margin-end">10</property>
                         <property name="margin-start">10</property>
-                        <!-- <child>
-                            <object class="GtkButton" id="fchooser">
-                                <property name="label">Open File</property>
-                            </object>
-                        </child> -->
                         
                         <child>
                             <object class="GtkLabel" id="text_view">
@@ -60,49 +53,56 @@
 
                 <child>
                     <object class="GtkBox" id="hbox">
-                        <property name="spacing">10</property>
+                        <property name="spacing">5</property>
                         <property name="halign">center</property>
                         <property name="margin-top">20</property>
 
                         <child>
                             <object class="GtkButton" id="previous_frame_button">
                                 <property name="label">Preivous Frame</property>
+                                <style><class name="video-player-control-button"></class></style>
                             </object>
                         </child>
 
                         <child>
                             <object class="GtkButton" id="play_button">
                                 <property name="label">Play</property>
+                                <style><class name="video-player-control-button"></class></style>
                             </object>
                         </child>
 
                         <child>
                             <object class="GtkButton" id="next_frame_button">
                                 <property name="label">Next Frame</property>
+                                <style><class name="video-player-control-button"></class></style>
                             </object>
                         </child>
 
                         <child>
                             <object class="GtkButton" id="set_start_time_button">
                                 <property name="label">Set Start Time</property>
+                                <style><class name="video-player-control-button"></class></style>
                             </object>
                         </child>
 
                         <child>
                             <object class="GtkButton" id="split_button">
                                 <property name="label">Split</property>
+                                <style><class name="video-player-control-button"></class></style>
                             </object>
                         </child>
 
                         <child>
                             <object class="GtkButton" id="toggle_mute_button">
                                 <property name="label">Mute/Unmute</property>
+                                <style><class name="video-player-control-button"></class></style>
                             </object>
                         </child>
 
                         <child>
                             <object class="GtkButton" id="remove_video_player_button">
                                 <property name="label">Remove Video Player</property>
+                                <style><class name="video-player-control-button"></class></style>
                             </object>
                         </child>
 

@@ -12,6 +12,7 @@ use crate::helpers::parse::{string_to_nseconds, validate_split_table_entry};
 use crate::widgets::video_player_widget::video_player::VideoPlayer;
 use std::collections::HashMap;
 use crate::widgets::split_panel::videosegmentproxy::VideoSegmentProxy;
+use gstreamer::ClockTime;
 
 
 mod imp {
@@ -320,7 +321,7 @@ impl SplitTable {
                                 // do name stuff here
                                 println!("Change name not impletemented");
                             }
-                            prop if prop.starts_with("relative-time-") => {
+                            prop if prop.starts_with("relative-time") => {
                                 println!("Changing {}", property);
                                 let row_index = liststore.find(&video_segment).unwrap();
                                 let valid_entry = validate_split_table_entry(&entry);
@@ -328,28 +329,59 @@ impl SplitTable {
                                     let stored_entry_data: u64 = proxy.property("value");
                                     entry.set_text(format_clock(stored_entry_data).as_str());
                                 } else { // updates segment data with new entry and fixes any conflicts
-                                    let new_time = string_to_nseconds(&entry.text().to_string()).unwrap();
-                                    //this should set relative time not normal time
-                                    video_segment.set_time(video_id.as_str(), new_time);
-                                    this.correct_conflicts(video_id.as_str(), row_index);
+                                    let new_relative_time = string_to_nseconds(&entry.text().to_string()).unwrap();
+                                    let new_time = new_relative_time + video_segment.get_offset(video_id.as_str());
+                                    let old_time = video_segment.get_time(video_id.as_str());
+
+                                    let new_time_milli = ClockTime::from_nseconds(new_time).mseconds();
+                                    let old_time_milli = ClockTime::from_nseconds(old_time).mseconds();
+
+                                    let difference: i64 = (new_time_milli as i64 - old_time_milli as i64).abs();
+                                    let maximum_allowed_difference = 2;
+                                    
+                                    // Only updates the time if the difference between the current time and the new time is greater than the maximum allowed difference of 2 milliseconds
+                                    // If the difference is less than the maximum allowed difference it is likely the entered value is the truncated version of the current value which we would rather keep. 
+                                    if difference > maximum_allowed_difference {
+                                        video_segment.set_time(video_id.as_str(), new_time);
+                                        this.correct_conflicts(video_id.as_str(), row_index);
+                                    } else {
+                                        let stored_entry_data: u64 = proxy.property("value");
+                                        entry.set_text(format_clock(stored_entry_data).as_str());
+                                    }
                                 }
                             }
-                            prop if prop.starts_with("duration-") => {
+                            prop if prop.starts_with("duration") => {
                                 println!("Changing {}", property);
                                 let row_index = liststore.find(&video_segment).unwrap();
                                 let valid_entry = validate_split_table_entry(&entry);
-                                if !valid_entry {// Restores segment data if invalid entry
+                                if !valid_entry { // Restores segment data if invalid entry
                                     let stored_entry_data: u64 = proxy.property("value");
                                     entry.set_text(format_clock(stored_entry_data).as_str());
                                 } else { // updates segment data with new entry and fixes any conflicts
+                                    let old_duration = video_segment.get_duration(video_id.as_str()).unwrap();
                                     let new_duration = string_to_nseconds(&entry.text().to_string()).unwrap();
-                                    video_segment.set_duration(video_id.as_str(), new_duration);
-                                    let previous_time: u64 = match this.get_previous_time(video_id.as_str(), row_index) {
-                                        Some(time) => time,
-                                        None => 0,
-                                    };
-                                    video_segment.set_time(video_id.as_str(), previous_time + new_duration);
-                                    this.correct_conflicts(video_id.as_str(), row_index);
+
+                                    let old_duration_milli = ClockTime::from_nseconds(old_duration).mseconds();
+                                    let new_duration_milli = ClockTime::from_nseconds(new_duration).mseconds();
+
+                                    let difference: i64 = (new_duration_milli as i64 - old_duration_milli as i64).abs();
+                                    let maximum_allowed_difference = 2;
+
+                                    // Only updates the duration if the difference between the current duration and the new duration is greater than the maximum allowed difference of 2 milliseconds
+                                    // If the difference is less than the maximum allowed difference it is likely the entered value is the truncated version of the current value which we would rather keep.
+                                    if difference > maximum_allowed_difference {
+                                        video_segment.set_duration(video_id.as_str(), new_duration);
+                                        let previous_time: u64 = match this.get_previous_time(video_id.as_str(), row_index) {
+                                            Some(time) => time,
+                                            None => video_segment.get_offset(video_id.as_str()),
+                                        };
+                                        video_segment.set_time(video_id.as_str(), previous_time + new_duration);
+                                        this.correct_conflicts(video_id.as_str(), row_index);
+                                    } else {
+                                        let stored_entry_data: u64 = proxy.property("value");
+                                        entry.set_text(format_clock(stored_entry_data).as_str());
+                                    }
+
                                 }
                             }
                             _ => {
@@ -384,15 +416,11 @@ impl SplitTable {
             let item = list_item.item().and_then(|obj| obj.downcast::<VideoSegment>().ok()).expect("The item is not a VideoSegment");
             let entry = list_item.child().and_then(|child| child.downcast::<Entry>().ok()).expect("The child widget is not Entry");
             let proxy = VideoSegmentProxy::new(&item, &video_id, &property);
-            //AKSDJLAKSJDLKASJDLKASDLKJASLDKJLASDKJASLKJLASDK
             // Binds the u64 stored in the video segment to the entries formatted clock
             // Any changes to the videosegment will be updated in the entry object
             proxy.bind_property("value", &entry, "text")
                 .flags(glib::BindingFlags::DEFAULT | glib::BindingFlags::SYNC_CREATE)
-                .transform_to(move |_, value: u64| { 
-                    println!("-----------------transform in column bind--------------");
-                    let clock = format_clock(value);
-                    println!("---------Value: {value} ------------- = Clocktime: {clock}");
+                .transform_to(move |_, value: u64| {
                     Some(format_clock(value).to_value())
                 })
                 .build();

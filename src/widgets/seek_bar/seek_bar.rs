@@ -123,7 +123,7 @@ impl SeekBar {
             move |time_entry, _| {
                 //Retrieve new and old time position
                 let old_time = if time_entry.get_old_time() == u64::MAX { 0 } else { time_entry.get_old_time() - offset.get_time()};
-                let time = time_entry.get_time() - offset.get_time();
+                let time = time_entry.get_time().saturating_sub(offset.get_time());
                 let width = scale.width();
                 
                 //Update timeline length dirt flag if the new time would affect timeline length and auto timeline length handling is enabled

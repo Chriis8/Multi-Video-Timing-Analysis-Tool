@@ -82,33 +82,28 @@
                                         
                                         <child>
                                             <object class="GtkButton" id="toggle_shared_video_play">
-                                                <property name="hexpand">false</property>
-                                                <property name="halign">fill</property>
+                                                <style><class name="side-panel-button"></class></style>
                                                 <property name="label">Toggle Control</property>
                                             </object>
                                         </child>
 
                                         <child>
                                             <object class="GtkButton" id="new_video_player_button">
-                                                <style><class name="new-video-player-button"></class></style>
-                                                <!-- <property name="hexpand">false</property>
-                                                <property name="halign">fill</property> -->
+                                                <style><class name="side-panel-button"></class></style>
                                                 <property name="label">New Player</property>
                                             </object>
                                         </child>
                 
                                         <child>
                                             <object class="GtkButton" id="add_row_above_button">
-                                                <!-- <property name="hexpand">false</property>
-                                                <property name="halign">fill</property> -->
+                                                <style><class name="side-panel-button"></class></style>
                                                 <property name="label">Add Row Above</property>
                                             </object>
                                         </child>
                 
                                         <child>
                                             <object class="GtkButton" id="add_row_below_button">
-                                                <!-- <property name="hexpand">false</property>
-                                                <property name="halign">fill</property> -->
+                                                <style><class name="side-panel-button"></class></style>
                                                 <property name="label">Add Row Below</property>
                                             </object>
                                         </child>

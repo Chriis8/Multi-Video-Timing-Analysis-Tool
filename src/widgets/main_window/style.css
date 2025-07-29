@@ -47,13 +47,15 @@
     border-style: solid;
 }
 
-.new-video-player-button {
+.side-panel-button {
     background-color: rgb(44, 44, 44);
     border-radius: 0px;
     border: none;
     padding: 0px;
     min-width: 10px;
 }
+
+
 
 .shared-seek-bar-container {
     background-color: rgb(44, 44, 44);
@@ -76,7 +78,6 @@ scale slider {
     background-color: rgb(29, 128, 249);
     background-image: none;
 }
-
 
 entry {
     padding: 0px;

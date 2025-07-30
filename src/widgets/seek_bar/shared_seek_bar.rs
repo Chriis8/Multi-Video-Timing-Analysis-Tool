@@ -25,6 +25,7 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use crate::helpers::data::borrow_asref_upgrade;
 use gstreamer::prelude::ClockExt;
+use crate::helpers::data::get_data;
 
 
 mod imp {
@@ -152,7 +153,10 @@ mod imp {
                     let video_player_container = borrow_asref_upgrade(&video_player_container_weak).ok().unwrap();
                     let split_table_liststore = borrow_asref_upgrade(&split_table_liststore_weak).ok().unwrap();
                     let split_table = borrow_asref_upgrade(&split_table_weak).ok().unwrap();
+
+                    let previous_starting_segment = starting_segment.get();
                     
+                    // Gets the index of the segment that is currently selected
                     match split_table_column_view.model().and_downcast::<SingleSelection>() {
                         Some(selection_model) => {
                             let selected_index = selection_model.selected();
@@ -163,6 +167,9 @@ mod imp {
                         }
                     }
 
+                    let mut offset_times: HashMap<String, u64> = HashMap::new();
+
+                    // Gets the time of the currently selected segment i.e. the displayed time of the previous segment and stores that time in the offset_times hashmap
                     for child in flowbox_children(&video_player_container) {
                         let fb_child = match child.downcast_ref::<FlowBoxChild>() {
                             Some(c) => c,
@@ -180,6 +187,7 @@ mod imp {
                         };
 
                         
+                        // Gets time of the previous segment i.e. the starting time of the selected segment
                         let video_player_id = video_player.get_id();
                         let start_time_offset = split_table.get_offset_time_entry(video_player_id.as_str()).get_time();
                         let start_time_for_syncing = if starting_segment.get() == 0 { start_time_offset } else { 
@@ -189,7 +197,44 @@ mod imp {
                                 .and_downcast::<VideoSegment>()
                                 .unwrap()
                                 .get_time(video_player_id.as_str()
-                        )};
+                            )
+                        };
+                        
+                        if start_time_for_syncing == u64::MAX {
+                            println!("Error: No select split time not found for video id: {video_player_id}");
+                            starting_segment.set(previous_starting_segment);
+                            break
+                        }
+
+                        offset_times.insert(video_player_id.to_string(), start_time_for_syncing);
+                    }
+
+                    let count = *unsafe{ get_data::<usize>(&video_player_container, "count").unwrap().as_ref() };
+
+                    // Check to make sure each time was found for the selected segment
+                    if count != offset_times.len() {
+                        eprintln!("Error: Select split time missing");
+                        return;
+                    }
+
+                    // Seeks to the offset time found for each video
+                    for child in flowbox_children(&video_player_container) {
+                        let fb_child = match child.downcast_ref::<FlowBoxChild>() {
+                            Some(c) => c,
+                            None => continue,
+                        };
+
+                        let content = match fb_child.child() {
+                            Some(c) => c,
+                            None => continue,
+                        };
+
+                        let video_player = match content.downcast_ref::<VideoPlayer>() {
+                            Some(vp) => vp,
+                            None => continue,
+                        };
+
+                        let video_player_id = video_player.get_id();
 
                         let arc = match video_player.pipeline().upgrade() {
                             Some(a) => a,
@@ -206,8 +251,8 @@ mod imp {
                                 continue
                             }
                         };
-
-                        println!("JUMP TO SEGMENT {video_player_id}: start_time_offset: {start_time_offset}");
+                        
+                        let start_time_for_syncing = offset_times[&video_player_id];
                         println!("JUMP TO SEGMENT {video_player_id}: start_time_for_syncing (starting_segment_time): {start_time_for_syncing}");
                         if let Err(e) = pipeline.seek_position(ClockTime::from_nseconds(start_time_for_syncing)) {
                             eprintln!("Player {video_player_id} error setting position: {e}");

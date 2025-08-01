@@ -59,6 +59,7 @@ mod imp {
         pub debounce_duration: RefCell<Duration>,
         pub last_click: Rc<RefCell<Option<Instant>>>,
         pub seek_bar_update_timeout: Rc<RefCell<Option<glib::SourceId>>>,
+        pub selected_segment: Rc<Cell<u32>>,
     }
 
     #[gtk::glib::object_subclass]
@@ -77,7 +78,7 @@ mod imp {
     }
     
     impl SharedSeekBar {
-        pub fn setup_buttons(&self) {
+        pub fn setup_buttons(&self, obj: &super::SharedSeekBar) {
             println!("------------------setting up buttons");
             self.previous_frame_button.connect_clicked(glib::clone!(
                 #[strong(rename_to = video_player_container_weak)] self.video_player_container,
@@ -142,12 +143,14 @@ mod imp {
                     sync_manager.frame_forward();
                 }
             ));
+
             self.jump_to_segment_button.connect_clicked(glib::clone!(
                 #[strong(rename_to = split_table_column_view_weak)] self.split_table_column_view,
-                #[strong(rename_to = starting_segment)] self.starting_segment,
+                #[strong(rename_to = starting_segment)] self.selected_segment,
                 #[strong(rename_to = video_player_container_weak)] self.video_player_container,
                 #[strong(rename_to = split_table_weak)] self.split_table,
                 #[strong(rename_to = split_table_liststore_weak)] self.split_table_liststore,
+                #[strong(rename_to = this)] obj,
                 move |_| {
                     let split_table_column_view = borrow_asref_upgrade(&split_table_column_view_weak).ok().unwrap();
                     let video_player_container = borrow_asref_upgrade(&video_player_container_weak).ok().unwrap();
@@ -155,15 +158,17 @@ mod imp {
                     let split_table = borrow_asref_upgrade(&split_table_weak).ok().unwrap();
 
                     let previous_starting_segment = starting_segment.get();
+                    let mut new_starting_segment = 0u32;
                     
                     // Gets the index of the segment that is currently selected
                     match split_table_column_view.model().and_downcast::<SingleSelection>() {
                         Some(selection_model) => {
                             let selected_index = selection_model.selected();
-                            starting_segment.set(selected_index);
+                            //starting_segment.set(selected_index);
+                            new_starting_segment = selected_index;
                         },
                         None => {
-                            starting_segment.set(0u32);
+                            //starting_segment.set(0u32);
                         }
                     }
 
@@ -190,9 +195,8 @@ mod imp {
                         // Gets time of the previous segment i.e. the starting time of the selected segment
                         let video_player_id = video_player.get_id();
                         let start_time_offset = split_table.get_offset_time_entry(video_player_id.as_str()).get_time();
-                        let start_time_for_syncing = if starting_segment.get() == 0 { start_time_offset } else { 
-                            split_table_liststore.item(starting_segment
-                                .get()
+                        let start_time_for_syncing = if new_starting_segment == 0 { start_time_offset } else { 
+                            split_table_liststore.item(new_starting_segment
                                 .saturating_sub(1))
                                 .and_downcast::<VideoSegment>()
                                 .unwrap()
@@ -202,7 +206,6 @@ mod imp {
                         
                         if start_time_for_syncing == u64::MAX {
                             println!("Error: No select split time not found for video id: {video_player_id}");
-                            starting_segment.set(previous_starting_segment);
                             break
                         }
 
@@ -258,6 +261,8 @@ mod imp {
                             eprintln!("Player {video_player_id} error setting position: {e}");
                         }
                     }
+
+                    this.set_selected_segment(new_starting_segment);
                 }
             ));
         }
@@ -348,7 +353,8 @@ impl SharedSeekBar {
         imp.sync_manager.borrow_mut().replace(Downgrade::downgrade(sync_manager));
         imp.split_table.borrow_mut().replace(Downgrade::downgrade(split_table));
         *imp.debounce_duration.borrow_mut() = Duration::from_millis(200);
-        imp.setup_buttons();
+        imp.selected_segment.set(0);
+        imp.setup_buttons(&widget);
         imp.setup_seek_bar_control();
         widget.set_controls(false);
         widget
@@ -385,10 +391,30 @@ impl SharedSeekBar {
             let color = video_player.get_color();
             let time = row.get_time_entry_copy(video_player_id.as_str());
             let offset_time_entry = split_table.get_offset_time_entry(video_player_id.as_str());
-
             let segment_id = row.get_segment_id();
 
-            imp.seek_bar.add_mark(format!("video-{video_player_id}, segment-{segment_id}"), time, color.as_str(), offset_time_entry);
+            let selected_segment = imp.selected_segment.get();
+
+            let selected_segment_time_entry = if selected_segment == 0 { offset_time_entry } else { 
+                split_table_liststore.item(selected_segment.saturating_sub(1))
+                    .and_downcast::<VideoSegment>()
+                    .unwrap()
+                    .get_time_entry_copy(video_player_id.as_str()
+                )
+            };
+
+            let test_time = time.get_time();
+            if test_time != u64::MAX {
+                let c_time = ClockTime::from_nseconds(test_time);
+                println!("{c_time}");
+            }
+            let offset_time_test = selected_segment_time_entry.get_time();
+            if offset_time_test != u64::MAX {
+                let of_time = ClockTime::from_nseconds(offset_time_test);
+                println!("{of_time}");
+            }
+
+            imp.seek_bar.add_mark(format!("video-{video_player_id}, segment-{segment_id}"), time, color.as_str(), selected_segment_time_entry);
         }
     }
 
@@ -406,8 +432,17 @@ impl SharedSeekBar {
             let time = row.get_time_entry_copy(video_player_id);
             let offset = split_table.get_offset_time_entry(video_player_id);
             let segment_id = row.get_segment_id();
+            let selected_segment = imp.selected_segment.get();
 
-            imp.seek_bar.add_mark(format!("video-{video_player_id}, segment-{segment_id}"), time, color, offset);
+            let selected_segment_time_entry = if selected_segment == 0 { offset } else { 
+                split_table_liststore.item(selected_segment.saturating_sub(1))
+                    .and_downcast::<VideoSegment>()
+                    .unwrap()
+                    .get_time_entry_copy(video_player_id
+                )
+            };
+
+            imp.seek_bar.add_mark(format!("video-{video_player_id}, segment-{segment_id}"), time, color, selected_segment_time_entry);
         }
     }
 
@@ -679,6 +714,33 @@ impl SharedSeekBar {
                 println!("Seeked");
             },
         }
+    }
+
+    pub fn set_selected_segment(&self, segment_index: u32) {
+        let imp = self.imp();
+
+        let previous_selected_segment = imp.selected_segment.get();
+        println!("previous selected segment: {previous_selected_segment}");
+        imp.selected_segment.set(segment_index);
+
+        let new_selected_segment = imp.selected_segment.get();
+        println!("new selected segment: {new_selected_segment}");
+
+        println!("remove all marks");
+        imp.seek_bar.reset_all_marks();
+
+        println!("readding marks");
+        let row_count = borrow_asref_upgrade(&imp.split_table_liststore).ok().unwrap().n_items();
+        for i in 0..row_count {
+            println!("connecting row index: {i}");
+            self.connect_row(i);
+        }
+        imp.seek_bar.update_timeline_length();
+    }
+
+    pub fn get_selected_segment(&self) -> u32 {
+        let imp = self.imp();
+        imp.selected_segment.get()
     }
 }
 

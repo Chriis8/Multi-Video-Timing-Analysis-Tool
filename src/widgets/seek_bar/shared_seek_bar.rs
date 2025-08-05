@@ -55,7 +55,7 @@ mod imp {
         pub is_dragging: Rc<Cell<bool>>,
         pub is_paused: Rc<Cell<bool>>,
         pub has_control: Rc<Cell<bool>>,
-        pub starting_segment: Rc<Cell<u32>>,
+        //pub starting_segment: Rc<Cell<u32>>,
         pub debounce_duration: RefCell<Duration>,
         pub last_click: Rc<RefCell<Option<Instant>>>,
         pub seek_bar_update_timeout: Rc<RefCell<Option<glib::SourceId>>>,
@@ -96,9 +96,12 @@ mod imp {
                 #[strong(rename_to = last_click)] self.last_click,
                 #[strong(rename_to = debounce_duration)] self.debounce_duration,
                 #[strong(rename_to = split_table_weak)] self.split_table,
+                #[strong(rename_to = starting_segment)] self.selected_segment,
+                #[strong(rename_to = split_table_liststore_weak)] self.split_table_liststore,
                 move |_| {
                     let sync_manager = borrow_asref_upgrade(&sync_manager_weak).ok().unwrap();
                     let split_table = borrow_asref_upgrade(&split_table_weak).ok().unwrap();
+                    let split_table_liststore = borrow_asref_upgrade(&split_table_liststore_weak).ok().unwrap();
 
                     let now = Instant::now();
                     let mut last_click = last_click.borrow_mut();
@@ -122,8 +125,17 @@ mod imp {
                         //Record the start time offset for each video
                         let mut offsets: HashMap<String, u64> = HashMap::new();
                         let offsets_row_map = split_table.get_start_time_offset_row_map();
+                        let start_segment = starting_segment.get();
                         for (video_player_id, offset_time_entry) in offsets_row_map.borrow().iter() {
-                            offsets.insert(video_player_id.to_string(), offset_time_entry.get_time());
+                            let selected_segment_start_time = if start_segment == 0 { offset_time_entry.get_time() } else { 
+                                split_table_liststore.item(start_segment
+                                    .saturating_sub(1))
+                                    .and_downcast::<VideoSegment>()
+                                    .unwrap()
+                                    .get_time(video_player_id.as_str()
+                                )
+                            };
+                            offsets.insert(video_player_id.to_string(), selected_segment_start_time);
                         }
                         
                         sync_manager.play_videos(offsets);
@@ -157,7 +169,6 @@ mod imp {
                     let split_table_liststore = borrow_asref_upgrade(&split_table_liststore_weak).ok().unwrap();
                     let split_table = borrow_asref_upgrade(&split_table_weak).ok().unwrap();
 
-                    let previous_starting_segment = starting_segment.get();
                     let mut new_starting_segment = 0u32;
                     
                     // Gets the index of the segment that is currently selected
@@ -293,20 +304,33 @@ mod imp {
                 #[weak(rename_to = seek_bar)] self.seek_bar,
                 #[strong(rename_to = sync_manager_weak)] self.sync_manager,
                 #[strong(rename_to = split_table_weak)] self.split_table,
+                #[strong(rename_to = starting_segment)] self.selected_segment,
+                #[strong(rename_to = split_table_liststore_weak)] self.split_table_liststore,
                 move |_,_,_x,_y| {
                     let sync_manager = borrow_asref_upgrade(&sync_manager_weak).ok().unwrap();
                     let split_table = borrow_asref_upgrade(&split_table_weak).ok().unwrap();
-
+                    let split_table_liststore = borrow_asref_upgrade(&split_table_liststore_weak).ok().unwrap();
                     //Record the absolute positions for each video to use to perform the seek
                     let mut clock_positions: HashMap<String, ClockTime> = HashMap::new();
                     let start_time_offset_row_map = split_table.get_start_time_offset_row_map();
+                    let start_segment = starting_segment.get();
                     for (video_player_id, offset) in start_time_offset_row_map.borrow().iter() {
                         let offset_time = offset.get_time();
+                        
+                        let selected_segment_start_time = if start_segment == 0 { offset_time } else { 
+                            split_table_liststore.item(start_segment
+                                .saturating_sub(1))
+                                .and_downcast::<VideoSegment>()
+                                .unwrap()
+                                .get_time(video_player_id.as_str()
+                            )
+                        };
+
                         let percent_position = seek_bar.get_scale().value() / 100.0;
                         let position = (percent_position * seek_bar.get_timeline_length() as f64) as u64;
                         
                         //Relative position + start time offset
-                        let clock_time_position = ClockTime::from_nseconds(position + offset_time);
+                        let clock_time_position = ClockTime::from_nseconds(position + selected_segment_start_time);
                         clock_positions.insert(video_player_id.to_string(), clock_time_position);
                     }
                     

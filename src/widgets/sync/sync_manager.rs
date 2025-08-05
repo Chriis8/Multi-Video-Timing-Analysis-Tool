@@ -119,7 +119,7 @@ impl SyncManager {
         }
 
         //Finds the position the ui progression bar should be.
-        let scale_position = self.get_current_logical_position();
+        let scale_position = self.get_current_logical_position(&offsets);
         self.emit_event(SyncEvent::PlaybackStarted { base_time: shared_clock_time, scale_position: scale_position });
     }
 
@@ -278,35 +278,49 @@ impl SyncManager {
         }
     }
 
-    fn get_current_logical_position(&self) -> ClockTime {
-        if let Some(video_pipeline_arc) = self.get_longest_pipeline() {
+    // Update this part to use the past in offsets as the start time instead of fetching the start times from the video pipeline. 
+    // I am going to assume things will mess up here but the offset by default should be the same as the start time as it currently stands.
+    // Instead of using start time from the video pipeline to calculate the duration of the clamped video inside the video pipeline object, the calc should probably
+    // be done here using the offset time pased in which would be the same as the start time by default or the corresponding time if a segment is selected.
+    // Everything else should be the same or similar, just replace the duration call to the video pipeline with a end time fetch and calc the difference between that and the offset to get
+    // the correct duration with the currently selected segment.
+    fn get_current_logical_position(&self, offsets: &HashMap<String, u64>) -> ClockTime {
+        if let Some((video_pipeline_arc, video_player_id, longest_duration)) = self.get_longest_pipeline(offsets) {
             let video_pipeline = video_pipeline_arc.lock().unwrap();
-            let duration = video_pipeline.get_logical_duration().unwrap().nseconds();
-            let percent = video_pipeline.position_to_logical_percent().ok().unwrap();
-            let logical_position = (percent * duration as f64) as u64;
+            let start_time = offsets[video_player_id.as_str()];
+            let current_position = video_pipeline.get_position().unwrap().nseconds().saturating_sub(start_time);
+            let percent = current_position as f64 / longest_duration as f64;
+            // let logical_duration = self.get_logical_duration()?.nseconds();
+            // let start_time = self.get_start()?;
+            // let position_ns = position.saturating_sub(start_time).nseconds();
+            
+            // let percent = position_ns as f64 / logical_duration as f64;
+            // Ok(percent)
+            //let percent = video_pipeline.position_to_logical_percent().ok().unwrap();
+            let logical_position = (percent * longest_duration as f64) as u64;
             return ClockTime::from_nseconds(logical_position);
         }
         ClockTime::ZERO
     }
 
-    fn get_longest_pipeline(&self) -> Option<Arc<Mutex<VideoPipeline>>> {
+    fn get_longest_pipeline(&self, offsets: &HashMap<String, u64>) -> Option<(Arc<Mutex<VideoPipeline>>, String, u64)> {
         let imp = self.imp();
-        let mut longest_pipeline: Option<Arc<Mutex<VideoPipeline>>> = None; 
-        for pipeline_weak in imp.pipelines.lock().unwrap().values() {
+        let mut longest_pipeline: Option<(Arc<Mutex<VideoPipeline>>, String, u64)> = None; 
+        for (video_player_id, pipeline_weak) in imp.pipelines.lock().unwrap().iter() {
             let video_pipeline_arc = pipeline_weak.upgrade().unwrap();
             let video_pipeline = video_pipeline_arc.lock().unwrap();
-            
-            let duration = video_pipeline.get_logical_duration();
-            if let Some(longest_pipeline_arc) = longest_pipeline.clone() {
-                if duration > longest_pipeline_arc.lock().unwrap().get_logical_duration() {
-                    longest_pipeline = Some(video_pipeline_arc.clone());
+            let offset = offsets[video_player_id];
+            //let duration = video_pipeline.get_logical_duration();
+            let duration = video_pipeline.get_end().unwrap().nseconds() - offset;
+            if let Some((_, _, longest_duration)) = longest_pipeline.clone() {
+                if duration > longest_duration {
+                    longest_pipeline = Some((video_pipeline_arc.clone(), video_player_id.to_string(), duration));
                 }
             } else {
-                longest_pipeline = Some(video_pipeline_arc.clone());
+                longest_pipeline = Some((video_pipeline_arc.clone(), video_player_id.to_string(), duration));
             }
         }
         longest_pipeline
     }
-
 
 }

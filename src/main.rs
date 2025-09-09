@@ -266,126 +266,72 @@ fn build_ui(app: &Application) -> Builder {
 }
 
 fn main() -> glib::ExitCode {
-    let run_app = 0;
-    if run_app == 0 {
-        gstreamer::init().unwrap();
-        gtk::init().unwrap();
+    
+    gstreamer::init().unwrap();
+    gtk::init().unwrap();
 
-        std::env::set_var("GTK_THEME", "Adwaita:dark");
+    std::env::set_var("GTK_THEME", "Adwaita:dark");
 
-        gstgtk4::plugin_register_static().expect("Failed to register gstgtk4 plugin");
+    gstgtk4::plugin_register_static().expect("Failed to register gstgtk4 plugin");
 
-        gio::resources_register_include!("vplayer.gresource")
-            .expect("Failed to register video player resource.");
+    gio::resources_register_include!("vplayer.gresource")
+        .expect("Failed to register video player resource.");
 
-        gio::resources_register_include!("mwindow.gresource")
-            .expect("Failed to register main window resource.");
+    gio::resources_register_include!("mwindow.gresource")
+        .expect("Failed to register main window resource.");
 
-        // gio::resources_register_include!("spanel.gresource")
-        //     .expect("Failed to register split planel resource.");
+    // gio::resources_register_include!("spanel.gresource")
+    //     .expect("Failed to register split planel resource.");
 
-        gio::resources_register_include!("seekbar.gresource")
-            .expect("Failed to register seek bar resource.");
+    gio::resources_register_include!("seekbar.gresource")
+        .expect("Failed to register seek bar resource.");
 
-        gio::resources_register_include!("sharedseekbar.gresource")
-            .expect("Failed to register shared seek bar resource.");
+    gio::resources_register_include!("sharedseekbar.gresource")
+        .expect("Failed to register shared seek bar resource.");
 
-        gio::resources_register_include!("sptable.gresource")
-            .expect("Failed to register sptable resource");
+    gio::resources_register_include!("sptable.gresource")
+        .expect("Failed to register sptable resource");
+    
+    let app = gtk::Application::new(None::<&str>, gtk::gio::ApplicationFlags::FLAGS_NONE);
+    app.connect_activate(|app| {
         
-        let app = gtk::Application::new(None::<&str>, gtk::gio::ApplicationFlags::FLAGS_NONE);
-        app.connect_activate(|app| {
-            
-            let builder = build_ui(app);
+        let builder = build_ui(app);
 
-            let builder_clone = builder.clone();
-            // ensures all video player are properly disposed 
-            app.connect_shutdown(move |_| {
-                println!("shutting down");
-                let video_container: FlowBox = builder_clone.object("video_container").expect("failed to get video_container from UI file");
-                for child in flowbox_children(&video_container) {
-                    let fb_child = match child.downcast_ref::<FlowBoxChild>() {
-                        Some(c) => c,
-                        None => continue,
-                    };
+        let builder_clone = builder.clone();
+        // ensures all video player are properly disposed 
+        app.connect_shutdown(move |_| {
+            println!("shutting down");
+            let video_container: FlowBox = builder_clone.object("video_container").expect("failed to get video_container from UI file");
+            for child in flowbox_children(&video_container) {
+                let fb_child = match child.downcast_ref::<FlowBoxChild>() {
+                    Some(c) => c,
+                    None => continue,
+                };
 
-                    let content = match fb_child.child() {
-                        Some(c) => c,
-                        None => continue,
-                    };
+                let content = match fb_child.child() {
+                    Some(c) => c,
+                    None => continue,
+                };
 
-                    let video_player = match content.downcast_ref::<VideoPlayer>() {
-                        Some(vp) => vp,
-                        None => continue,
-                    };
-                    video_player.unparent();
-                    video_player.cleanup();
-                }
-                let window: ApplicationWindow = builder.object("main_window").expect("Failed to get main_window from UI file");
-                let sync_manager = unsafe { get_data::<SyncManager>(&window, "sync_manager").unwrap().as_ref() };
-                unsafe {
-                    sync_manager.run_dispose();
-                }
-            });
-
-        });
-        let res = app.run();
-
-        unsafe {
-            gstreamer::deinit();
-        }
-        return res
-    } else if run_app == 1 {
-        gstreamer::init().unwrap();
-        gtk::init().unwrap();
-
-        std::env::set_var("GTK_THEME", "Adwaita:dark");
-
-        gstgtk4::plugin_register_static().expect("Failed to register gstgtk4 plugin");
-
-        gio::resources_register_include!("vplayer.gresource")
-            .expect("Failed to register video player resource.");
-
-        gio::resources_register_include!("mwindow.gresource")
-            .expect("Failed to register main window resource.");
-
-        // gio::resources_register_include!("spanel.gresource")
-        //     .expect("Failed to register split planel resource.");
-
-        gio::resources_register_include!("seekbar.gresource")
-            .expect("Failed to register seek bar resource.");
-
-        gio::resources_register_include!("sharedseekbar.gresource")
-            .expect("Failed to register shared seek bar resource.");
-
-        gio::resources_register_include!("sptable.gresource")
-            .expect("Failed to register sptable resource");
-        
-        let app = gtk::Application::new(None::<&str>, gtk::gio::ApplicationFlags::FLAGS_NONE);
-
-
-        app.connect_activate(|app| {
-
-            let window = ApplicationWindow::new(app);
-
-            window.set_default_size(800, 600);
-            window.set_title(Some("Video Player"));
-
-            load_css("src\\widgets\\main_window\\style.css");
-
-            let main_box = Box::new(gtk::Orientation::Horizontal, 10);
-            
-            window.set_child(Some(&main_box));
-            window.show();
+                let video_player = match content.downcast_ref::<VideoPlayer>() {
+                    Some(vp) => vp,
+                    None => continue,
+                };
+                video_player.unparent();
+                video_player.cleanup();
+            }
+            let window: ApplicationWindow = builder.object("main_window").expect("Failed to get main_window from UI file");
+            let sync_manager = unsafe { get_data::<SyncManager>(&window, "sync_manager").unwrap().as_ref() };
+            unsafe {
+                sync_manager.run_dispose();
+            }
         });
 
+    });
+    let res = app.run();
 
-        let res = app.run();
-
-        unsafe {
-            gstreamer::deinit();
-        }
-        return res
+    unsafe {
+        gstreamer::deinit();
     }
-    ExitCode::SUCCESS
+    return res
 }

@@ -16,6 +16,9 @@ This timing analysis tool helps syncronize multiple point of view recordings for
 
 
 ## Interface
+
+![Interface](interface-example.png)
+
 ### Main window
 The main window is where the video player and individual controls will be viewable. The size of the video players will scale down as more video players are added.
 
@@ -31,5 +34,5 @@ After toggling to the sync view all the videos will be set to the beginning (use
 ## Usage
 Once opened and running you can begin adding video players to the main window by clicking the "New Player" button in the right panel. This will prompt the user to select a video from the local machine file browser. Selecting a valid file type will create a new player in the main window with the loaded video and its controls. You may add new segments by clicking the button again in the right panel. Highlight the newly added segment and then use the scrubber in the video player panel to seek to a desired location in the video. Once you have moved to a position in the video you can click the split button in the video player controls and the time will appear in the table next to the segment you highlighted. There are two times that appear in the split table. The first time shows the relative time since the start of the clip. The second time is the duration of segment itself. Because the first time is relative to the start of the clip the user may edit the time in table at the bottom in the same way as the segment time to set the start time offset of an individual video. This will allow the user to adjust where the timing starts from and all the times in the table will be updated to match the new starting position. You may repeat this for each additional video you wish to include.
 
-After the video players are added and all the segment information is setup the user may click the toggle sync button in the right panel to synchronize the videos together. This enables the shared controls in the bottom panel. With the seek bar scrubbing, play/pause, and frame stepping controls the user may accurately analyze the differences in videos in real time. If the user chooses, they may highlight a segment in the right panel then click the jump to segment button in the bottom panel. This feature will temporarily move the start time offset value to the start of the highlighted segment to perform additional analysis.
+After the video players are added and all the segment information is setup the user may click the "Toggle Control" button in the right panel to synchronize the videos together. This enables the shared controls in the bottom panel. With the seek bar scrubbing, play/pause, and frame stepping controls the user may accurately analyze the differences in videos in real time. If the user chooses, they may highlight a segment in the right panel then click the jump to segment button in the bottom panel. This feature will temporarily move the start time offset value to the start of the highlighted segment to perform additional analysis.
 

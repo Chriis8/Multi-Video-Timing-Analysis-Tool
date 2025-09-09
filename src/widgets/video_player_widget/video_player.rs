@@ -353,7 +353,7 @@ impl VideoPlayer {
                     gtk::ResponseType::Accept => {
                         println!("Accepted");
                         if let Some(file) = obj.file() {
-                            let file_uri = gtk::gio::File::uri(&file);
+                            //let file_uri = gtk::gio::File::uri(&file);
                             let path_str = file.path().unwrap();
                             println!("File accepted: {}", path_str.to_string_lossy());
                             text.set_label(&path_str.to_string_lossy());
@@ -361,8 +361,8 @@ impl VideoPlayer {
                                 if let Ok(mut pipeline) = gstman.lock() {
                                     //Builds pipeline from selected file
                                     pipeline.reset();
-                                    pipeline.build_pipeline(Some(&file_uri.to_string()));
-
+                                    //pipeline.build_pipeline(Some(&file_uri.to_string()));
+                                    pipeline.build_pipeline(Some(&path_str.to_string_lossy()));
                                     //Sets gstreamers paintable element to picture widget
                                     let paintable = pipeline.get_paintable();
                                     pic.set_paintable(Some(&paintable));

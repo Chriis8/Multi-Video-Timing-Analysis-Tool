@@ -269,16 +269,26 @@ impl VideoPipeline {
     }
 
     // Sets up video pipeline
-    pub fn build_pipeline(&self, uri: Option<&str>) {
-        let uri = uri.unwrap();
-        println!("building pipeline from {uri}");
+    pub fn build_pipeline(&self, path: Option<&str>) {
+        let path = path.unwrap();
+        println!("building pipeline from {path}");
         
         // Sets up pipeline elements
-        let source = gstreamer::ElementFactory::make("uridecodebin")
+        // let source = gstreamer::ElementFactory::make("uridecodebin")
+        //     .name("source")
+        //     .property("uri", uri)
+        //     .build()
+        //     .expect("Failed to build source element");
+        let source = gstreamer::ElementFactory::make("filesrc")
             .name("source")
-            .property("uri", uri)
+            .property("location", path)
             .build()
             .expect("Failed to build source element");
+        let decodebin = gstreamer::ElementFactory::make("decodebin")
+            .name("decodebin")
+            .build()
+            .expect("Could not create decodebin");
+
         let audio_convert = gstreamer::ElementFactory::make("audioconvert")
             .name("audio_convert")
             .build()
@@ -310,7 +320,8 @@ impl VideoPipeline {
 
 
         // Connects elements in pipeline
-        self.pipeline.add_many([&source, &audio_convert, &volume, &audio_resample, &audio_sink, &video_convert, &video_rate, &video_scale, &self.gtksink]).unwrap();
+        self.pipeline.add_many([&source, &decodebin, &audio_convert, &volume, &audio_resample, &audio_sink, &video_convert, &video_rate, &video_scale, &self.gtksink]).unwrap();
+        source.link(&decodebin).unwrap();
         gstreamer::Element::link_many([&audio_convert, &volume, &audio_resample, &audio_sink])
             .expect("Failed to link audio elements");
         gstreamer::Element::link_many([&video_convert, &video_rate, &video_scale, &self.gtksink])
@@ -320,7 +331,7 @@ impl VideoPipeline {
         let video_convert_weak = video_convert.downgrade();
         
         // Connects source pads to video and audio sink
-        source.connect_pad_added(move |src, src_pad| {
+        decodebin.connect_pad_added(move |src, src_pad| {
             println!("Recieved new pad {} from {}", src_pad.name(), src.name());
 
             let audio_convert = match audio_convert_weak.upgrade() {

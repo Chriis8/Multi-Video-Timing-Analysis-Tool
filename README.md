@@ -13,7 +13,7 @@ This timing analysis tool helps syncronize multiple point of view recordings for
 
 ## Installation / Setup
 
-
+The project is not yet packaged for installation. You will need to clone the repository and build manually at this point.
 
 ## Interface
 
